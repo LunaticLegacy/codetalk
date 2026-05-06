@@ -1,0 +1,3 @@
+display_name: Code Semantic Sync
+short_description: Maintain living code maps and semantics
+default_prompt: Use $code-semantic-sync to inspect the codebase, summarize the architecture, and keep the semantic map in sync after edits.
