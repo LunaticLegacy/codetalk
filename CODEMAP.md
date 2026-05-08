@@ -50,7 +50,7 @@ Read it before modifying code. Update it after changing behavior.
 | `writeMap(options)` | Generate baseline semantic map from repo structure. | `options: CliOptions` | `void` | Writes CODEMAP.md. |
 | `syncMap(options)` | Update Change Sync section; optionally run LLM sync. | `options: CliOptions` | `Promise<void>` | Reads git changes, reads/writes CODEMAP.md, calls LLM. |
 | `askCodebase(options)` | Answer question using LLM with map context. | `options: CliOptions` | `Promise<void>` | Calls LLM, outputs response. |
-| `planChange(options)` | Generate implementation plan using LLM. | `options: CliOptions` | `Promise<void>` | Calls LLM, optionally writes plan file. |
+| `planChange(options)` | Generate implementation plan using LLM and write to disk. | `options: CliOptions` | `Promise<void>` | Calls LLM, always writes plan file (no `--write` flag needed). |
 | `execution(options)` | Execute a CODEPLAN.md: apply file changes in parallel via LLM. | `options: CliOptions` | `Promise<void>` | Creates MissionPanel, calls coordinator LLM, dispatches parallel file editors, writes all changes. |
 | `checkMap(options)` | Validate CODEMAP.md exists and is fresh. | `options: CliOptions` | `void` | Reads file timestamps; fails if map missing or stale. |
 | `collectSourceFiles(cwd)` | Walk directory for source files. | `cwd: string` | `SourceFile[]` | Reads file system. |

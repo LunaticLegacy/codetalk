@@ -158,9 +158,9 @@ async function testLlmMapWrite() {
 async function testPlanWrite() {
   await withMockServer(async (apiUrl) => {
     run("config", "set", "--api-url", apiUrl, "--api-key", "test-secret", "--model", "test-model");
-    const output = await runAsync("plan", "change this safely", "--write", "--out", "plans/next.md");
-    assertIncludes(output, "Wrote plan: plans/next.md", "plan --write confirms plan write");
-    assertIncludes(read(join(fixture, "plans", "next.md")), "LLM Architecture", "plan --write lands returned plan content");
+    const output = await runAsync("plan", "change this safely", "--out", "plans/next.md");
+    assertIncludes(output, "Wrote plan: plans/next.md", "plan confirms plan write");
+    assertIncludes(read(join(fixture, "plans", "next.md")), "LLM Architecture", "plan lands returned plan content");
   }, { stream: false });
 }
 

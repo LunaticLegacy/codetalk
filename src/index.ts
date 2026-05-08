@@ -145,7 +145,7 @@ const COMMANDS = [
   { command: "codetalker scan [--write] [--stream] [--parallel 4]", purpose: "Use parallel LLM reviewers to produce architecture semantics." },
   { command: "codetalker map", purpose: "Generate a baseline semantic map from repository structure." },
   { command: "codetalker ask \"message\" [--stream]", purpose: "Answer codebase questions from map and scan context." },
-  { command: "codetalker plan \"request\" [--stream] [--write] [--out CODEPLAN.md]", purpose: "Generate a safe implementation plan without editing files." },
+  { command: "codetalker plan \"request\" [--stream] [--out CODEPLAN.md]", purpose: "Generate a safe implementation plan and write it to disk." },
   { command: "codetalker exec [--plan CODEPLAN.md] [--parallel 4] [--stream]", purpose: "Execute a CODEPLAN.md: apply all file changes in parallel via LLM." },
   { command: "codetalker sync [--stream]", purpose: "Refresh the semantic map change-sync section with LLM semantic updates." },
   { command: "codetalker check", purpose: "Fail when the semantic map is missing or stale." }
@@ -344,7 +344,7 @@ Usage:
   codetalker scan [--write] [--json] [--stream] [--parallel 4]
   codetalker map [--map CODEMAP.md]
   codetalker ask "How does auth work?" [--stream]
-  codetalker plan "Add magic-link login" [--stream] [--write] [--out CODEPLAN.md]
+  codetalker plan "Add magic-link login" [--stream] [--out CODEPLAN.md]
   codetalker exec [--plan CODEPLAN.md] [--parallel 4] [--stream]
   codetalker sync [--map CODEMAP.md] [--stream]
   codetalker check [--map CODEMAP.md]
@@ -356,7 +356,7 @@ Commands:
   scan    Run parallel LLM reviewers to produce architecture semantics
   map     Generate a baseline semantic map from the current repo shape
   ask     Ask a codebase question using LLM
-  plan    Generate an implementation plan using LLM; with --write, save to disk
+  plan    Generate an implementation plan using LLM and write it to disk
   exec    Execute a CODEPLAN.md: apply all file changes in parallel via LLM
   sync    Sync observed code changes back into the semantic map via LLM
   check   Fail if the semantic map is missing or older than source files
@@ -373,7 +373,6 @@ User guide:
   Need streaming answers      codetalker ask "question" --stream
   Need a change plan          codetalker plan "request"
   Need streaming plans        codetalker plan "request" --stream
-  Need plan on disk           codetalker plan "request" --write
   Need to execute a plan     codetalker exec
   Need parallel execution    codetalker exec --parallel 8
   Need to sync after edits    codetalker sync
@@ -520,20 +519,10 @@ async function planChange(options: CliOptions): Promise<void> {
 
   const plan = await runPromptCapture(options, prompt, panel, "plan");
 
-  if (options.write) {
-    writePlan(options, plan);
-    panel.done("plan", `Plan written to ${options.outPath}`);
-    panel.finish();
-    console.log(`Wrote plan: ${normalizePath(relative(options.cwd, resolve(options.cwd, options.outPath)))}`);
-    return;
-  }
-
-  panel.done("plan", `Complete (${plan.length} chars)`);
+  writePlan(options, plan);
+  panel.done("plan", `Plan written to ${options.outPath}`);
   panel.finish();
-
-  if (!options.stream) {
-    console.log(plan);
-  }
+  console.log(`Wrote plan: ${normalizePath(relative(options.cwd, resolve(options.cwd, options.outPath)))}`);
 }
 
 function checkMap(options: CliOptions): void {
