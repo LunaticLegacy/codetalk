@@ -51,7 +51,7 @@ import {
   streamProgress,
   trimTrailingSlash
 } from "./utils.js";
-import { buildSymbolIndex, saveIndex } from "./indexer.js";
+import { buildSymbolIndex, loadIndex, saveIndex } from "./indexer.js";
 import {
   DEFAULT_API_URL,
   DEFAULT_MODEL,
@@ -911,14 +911,19 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
 
   const { tmpDir, analysisFiles } = await runReviewerAgents(options, chunks, inspectionPlan, panel);
 
-  panel.add("merger", "Reading per-file analyses and synthesizing semantic map...");
+  panel.add("merger", "Reading index and synthesizing semantic map...");
 
-  const perFileAnalyses = analysisFiles.map((f, i) => {
-    const content = readFileSync(f, "utf8");
-    return `\n## Analysis ${i + 1}\n\n${content}`;
-  }).join("\n");
+  // Use symbol index (compact, structured) instead of full per-file analyses
+  const index = loadIndex(options.cwd);
+  const indexBlock = index
+    ? Object.entries(index.files).map(([path, info]) =>
+        `- ${path} (${info.language}, ${info.size}b)` +
+        (info.exports.length ? ` exports: ${info.exports.join(", ")}` : "") +
+        (info.imports.length ? ` imports: ${info.imports.join(", ")}` : "")
+      ).join("\n")
+    : "(no index available)";
 
-  const prompt = mergerPrompt(existingMap, formatScan(report), inspectionPlan, perFileAnalyses, options.mapPath);
+  const prompt = mergerPrompt(existingMap, formatScan(report), inspectionPlan, indexBlock, options.mapPath);
 
   const { content: mapResult, tokenStr: mergerTokens } = await callChatCompletion(options, prompt, panel, "merger", "Synthesizing map");
   const result = sanitizeMarkdownMap(mapResult);
