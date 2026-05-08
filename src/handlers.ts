@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 
 import type { CliOptions, ScanReport, SourceFile } from "./types.js";
@@ -292,14 +293,16 @@ export async function execution(options: CliOptions): Promise<void> {
 
   const results = await runLimited(tasks, options.parallel);
 
-  // Phase 3: Apply all changes
+  // Phase 3: Apply all changes — show each file as it's written
   panel.add("apply", "Writing changes to disk...");
   let changedCount = 0;
   for (const result of results) {
+    panel.update("apply", `Writing ${result.filePath}...`);
     const target = resolve(options.cwd, result.filePath);
     ensureParentDirectory(target);
     writeFileSync(target, result.newContent, "utf8");
     changedCount++;
+    panel.update("apply", `\u2713 ${result.filePath}`);
   }
   panel.done("apply", `Applied changes to ${changedCount} file${changedCount === 1 ? "" : "s"}`);
   panel.finish();
@@ -331,14 +334,19 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
     panel.add(`reviewer ${i + 1}`, "Waiting to inspect files...");
   }
 
-  const reviews = await runReviewerAgents(options, chunks, inspectionPlan, panel);
+  const { tmpDir, analysisFiles } = await runReviewerAgents(options, chunks, inspectionPlan, panel);
 
-  panel.add("merger", "Merging all reviewer outputs into semantic map...");
+  panel.add("merger", "Reading per-file analyses and synthesizing semantic map...");
+
+  const perFileAnalyses = analysisFiles.map((f, i) => {
+    const content = readFileSync(f, "utf8");
+    return `\n## Analysis ${i + 1}\n\n${content}`;
+  }).join("\n");
 
   const prompt = `You are Codetalker — a senior software architect producing a living semantic map.
 
 Goal:
-- Merge parallel reviewer outputs into a complete, accurate semantic map that can be written to ${options.mapPath}.
+- Synthesize the per-file analyses below into a complete, accurate semantic map that can be written to ${options.mapPath}.
 - This is NOT passive documentation. It is the behavioral contract that AI coding agents will read before modifying code. Every detail matters.
 
 Rules:
@@ -361,7 +369,7 @@ Quality standards:
 - When a file was truncated, explicitly state what remains uncertain.
 - Prefer observed reviewer evidence over inference.
 - Prefer concise bullet lists or tables when they improve scanability.
-- If reviewers produced conflicting observations, call out the conflict.
+- If analyses produced conflicting observations, call out the conflict.
 
 Existing semantic map:
 ${existingMap}
@@ -372,12 +380,16 @@ ${formatScan(report)}
 Coordinator inspection plan:
 ${inspectionPlan}
 
-Reviewer outputs:
-${reviews.map((review, index) => `\n## Reviewer ${index + 1}\n${review}`).join("\n")}`;
+Per-file analyses:
+${perFileAnalyses}`;
 
   const result = sanitizeMarkdownMap(await callChatCompletion(options, prompt, panel, "merger"));
   panel.done("merger", "Semantic map generated");
   panel.finish();
+
+  // Clean up temp directory
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ok */ }
+
   return result;
 }
 
@@ -406,42 +418,61 @@ ${report.files.map((file) => `- ${file.path} (${file.language}, ${file.bytes} by
   return callChatCompletion(options, prompt, panel, panel ? "coordinator" : undefined);
 }
 
-export async function runReviewerAgents(options: CliOptions, chunks: SourceFile[][], inspectionPlan: string, panel?: MissionPanel): Promise<string[]> {
+export async function runReviewerAgents(options: CliOptions, chunks: SourceFile[][], inspectionPlan: string, panel?: MissionPanel): Promise<{ tmpDir: string; analysisFiles: string[] }> {
+  const tmpDir = mkdtempSync(join(tmpdir(), "codetalk-scan-"));
+  const analysisFiles: string[] = [];
+
   const tasks = chunks.map((chunk, index) => async () => {
     const agentId = `reviewer ${index + 1}`;
-    if (panel) {
-      panel.update(agentId, `Inspecting ${chunk.length} file${chunk.length === 1 ? "" : "s"}...`);
-    }
-    const prompt = `You are Codetalker reviewer agent ${index + 1}.
+    const fileAnalysisPaths: string[] = [];
 
-Goal:
-- Inspect only your assigned files.
-- Produce precise semantic notes for the merger agent.
-- Focus on observed behavior, not guesses.
+    for (let fi = 0; fi < chunk.length; fi++) {
+      const file = chunk[fi];
 
-Rules:
-- Return markdown.
-- For each assigned file, summarize responsibilities, exported types/functions/classes, inputs, outputs, side effects, runtime dependencies, and failure modes.
-- If a file excerpt is truncated, state exactly which file was truncated and what remains uncertain.
-- Do not produce the final CODEMAP.md; produce reviewer notes only.
+      panel?.update(agentId, `Reading ${file.path}...`);
+
+      const fullPath = resolve(options.cwd, file.path);
+      const content = existsSync(fullPath)
+        ? readFileSync(fullPath, "utf8").slice(0, 24_000)
+        : "(file not found)";
+
+      const prompt = `You are Codetalker file analyzer.
+
+Analyze this single source file. Be precise about what you observe.
+
+Focus on:
+- The file's role and responsibilities
+- Exported types, functions, classes, and their signatures
+- For each function/method: inputs, outputs, side effects, preconditions, failure modes
+- Dependencies (imports/requires)
+- Important invariants and edge cases
 
 Coordinator inspection plan:
 ${inspectionPlan}
 
-Assigned files:
-${chunk.map((file) => `- ${file.path} (${file.language}, ${file.bytes} bytes)`).join("\n")}
+File: ${file.path} (${file.language}, ${file.bytes} bytes)
 
-File evidence:
-${buildRepositoryEvidence(options, chunk, false)}`;
+\`\`\`\n${content}\n\`\`\``;
 
-    const result = await callChatCompletion(options, prompt, panel, agentId);
-    if (panel) {
-      panel.done(agentId, `${chunk.length} file${chunk.length === 1 ? "" : "s"} reviewed`);
+      const analysis = await callChatCompletion(options, prompt, panel, agentId);
+
+      const tmpPath = join(tmpDir, `reviewer-${index + 1}-file-${fi}-${sanitizePath(file.path)}.md`);
+      writeFileSync(tmpPath, analysis, "utf8");
+      fileAnalysisPaths.push(tmpPath);
+      analysisFiles.push(tmpPath);
+
+      panel?.update(agentId, `\u2713 ${file.path}`);
     }
-    return result;
+
+    panel?.done(agentId, `${chunk.length} file${chunk.length === 1 ? "" : "s"} analyzed`);
   });
 
-  return runLimited(tasks, options.parallel);
+  await runLimited(tasks, options.parallel);
+  return { tmpDir, analysisFiles };
+}
+
+function sanitizePath(p: string): string {
+  return p.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
 export async function runSemanticSync(options: CliOptions, currentMap: string, changedFiles: string[]): Promise<string> {
