@@ -11,7 +11,7 @@ Read it before modifying code. Update it after changing behavior.
   - **CLI handler** (`src/index.ts`) – single-file implementation of all commands.
   - **Test suite** (`scripts/test-cli.mjs`) – smoke tests using mock HTTP server.
   - **Dependencies**: Node.js built-ins (`fs`, `path`, `os`, `child_process`, `readline/promises`), external `git` binary, optional LLM API endpoint.
-  - **MissionPanel**: TTY-aware per-agent progress display used by multi-agent operations (`scan`, `exec`, `sync --llm`).
+  - **MissionPanel**: TTY-aware per-agent progress display used by ALL LLM-based operations (`scan`, `ask`, `plan`, `exec`, `sync --llm`).
 - **Scale**: Single file for all logic; ~48KB `src/index.ts`, ~10KB `scripts/test-cli.mjs`.
 
 ## Modules
@@ -31,7 +31,7 @@ Read it before modifying code. Update it after changing behavior.
 | `ScanReport` | Full report from `scan` command. | `root`, `source`, `files`, `commands`, `config`, `semanticMaps`, `packageInfo`, `ci`, `moduleRoles`, `git` | – |
 | `CodetakerConfig` | Configuration loaded from file or env. | `apiUrl`, `apiKey`, `model` | All must be present for LLM calls. |
 | `TokenUsage` | Token usage returned by LLM API. | `prompt_tokens: number`, `completion_tokens: number`, `total_tokens: number`, `prompt_tokens_details?: { cached_tokens?: number }` | – |
-| `MissionPanel` | Per-agent progress display manager. | Private: `#agents[]`, `#isTTY`, `#render()` | Agents are added, updated, marked done, then panel is finished. |
+| `MissionPanel` | Per-agent progress display manager. | Private: `#agents[]`, `#isTTY`, `#started`, `#render()` | Emits newline on first render to avoid overwriting command line. `finish()` restores cursor in TTY mode. |
 
 ## Functions
 
@@ -89,19 +89,25 @@ Read it before modifying code. Update it after changing behavior.
    - `config` → `configure()` → read/write config → exit 0.
    - `scan` → requires `--llm` (fails without it) → `scanRepo()` → build report → `runArchitectureScan()`.
    - `map` → `writeMap()` → `buildMap()` → write map.
-   - `ask` → `requireMessage()` → `askCodebase()` → `runPrompt()`.
-   - `plan` → `requireMessage()` → `planChange()` → LLM, optionally write plan.
+   - `ask` → `requireMessage()` → `askCodebase()` → MissionPanel (single `ask` agent) → `callChatCompletion` or `streamChatCompletion`.
+   - `plan` → `requireMessage()` → `planChange()` → MissionPanel (single `plan` agent) → `runPromptCapture`; optionally write plan.
    - `exec` → `execution()` → read CODEPLAN.md → coordinator → parallel editors → apply changes.
    - `sync` → `syncMap()` → git changes → update map; if `--llm`, `runSemanticSync()`.
    - `check` → `checkMap()` → fail if map missing/stale.
 5. Unrecognized command → `fail()`.
 
+### Single-Agent Operations (`ask` / `plan`)
+1. Creates a `MissionPanel` with a single agent.
+2. `panel.add("ask" / "plan", "Preparing question context..." / "Generating implementation plan...")`.
+3. If streaming: calls `streamChatCompletion` (content streamed to stdout) → `panel.done("ask/plan", "Response streamed")`.
+4. If non-streaming: calls `callChatCompletion` with panel (progress shows `Calling {model}` + elapsed time every 5s) → `panel.done("ask/plan", "Complete (N chars)")` → `panel.finish()` → `console.log(answer)`.
+
 ### Multi-Agent Execution (`exec`)
 1. Reads `CODEPLAN.md` (configurable via `--plan`).
 2. Creates `MissionPanel`.
-3. **Coordinator phase**: Sends plan + current map to LLM asking for structured list of files to modify.
-4. **Editor phase**: For each identified file, dispatches a parallel LLM agent that reads the file and generates new content. Runs at `--parallel` concurrency.
-5. **Apply phase**: Writes all new file contents to disk in order.
+3. **Coordinator phase**: `panel.add("coordinator", "Analyzing plan to identify files and change specs...")` → `callChatCompletion` with `makePanelProgress` (shows `Calling {model}` + elapsed) → `panel.done("coordinator", "Identified N files to edit")`.
+4. **Editor phase**: For each file, `panel.add("editor N", "Waiting: path/to/file")`. Parallel tasks: `panel.update("editor N", "Reading path...")` → `panel.update("editor N", "Asking LLM to generate new code for path...")` → `callChatCompletion` with `makePanelProgress` → `panel.done("editor N", "path updated")`. Runs at `--parallel` concurrency.
+5. **Apply phase**: `panel.add("apply", "Writing changes to disk...")` → writes all files → `panel.done("apply", "Applied changes to N files")` → `panel.finish()`.
 6. Reports modified/created files to stdout.
 
 ### Token Usage Display
@@ -135,7 +141,7 @@ After each LLM API call, `showTokenUsage` writes to stderr:
 | Config file | `config set` | Always when config command runs. |
 
 ### Terminal State Changes
-- **TTY mode**: `MissionPanel` uses `\x1b[N A` (cursor up) and `\x1b[K` (clear line) on stderr for in-place per-agent progress. `finish()` resets cursor with `\x1b[N B`.
+- **TTY mode**: `MissionPanel` emits `\n` on first render to push panel below the command line, then uses `\x1b[N A` (cursor up) and `\x1b[K` (clear line) on stderr for in-place per-agent progress. `finish()` resets cursor with `\x1b[N B`.
 - **Non-TTY mode**: Falls back to `[agentId] status\n` on stderr, emitted only when agents are `done`.
 - **Token display**: `[tokens] ...\n` written to stderr after each API call.
 
@@ -155,4 +161,14 @@ After each LLM API call, `showTokenUsage` writes to stderr:
 
 ## Change Sync
 
-- No changes synchronized yet.
+Last synchronized: 2026-05-08T05:09:14.048Z
+
+Changed files:
+- No git changes detected. If behavior changed outside git, update the relevant sections manually.
+
+Agent checklist:
+- Re-read each changed source file.
+- Update module responsibilities when file roles changed.
+- Update function semantics when inputs, outputs, side effects, or errors changed.
+- Update runtime flow when execution order changed.
+- Update compatibility notes when public behavior changed.

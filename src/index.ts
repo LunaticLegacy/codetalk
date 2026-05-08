@@ -69,6 +69,7 @@ type CodetalkerConfig = {
 class MissionPanel {
   #agents: Array<{ id: string; status: string; done: boolean; printed: boolean }> = [];
   #isTTY: boolean;
+  #started: boolean = false;
 
   constructor() {
     this.#isTTY = process.stderr.isTTY === true;
@@ -105,6 +106,11 @@ class MissionPanel {
   #render(): void {
     if (this.#isTTY) {
       const count = this.#agents.length;
+      if (!this.#started) {
+        // On first render, push output to a new line so we don't overwrite the command line
+        this.#started = true;
+        process.stderr.write("\n");
+      }
       // Move cursor up to first panel line, then redraw all
       if (count > 0) {
         process.stderr.write(`\x1b[${count}A`);
@@ -495,7 +501,19 @@ async function syncMap(options: CliOptions): Promise<void> {
 async function askCodebase(options: CliOptions): Promise<void> {
   const question = requireMessage(options, "Ask requires a question. Example: codetalker ask \"How does auth work?\"");
   const prompt = buildAgentPrompt(options, "Answer the user's codebase question with concrete references and call out uncertainty.", question);
-  await runPrompt(options, prompt);
+
+  const panel = new MissionPanel();
+  panel.add("ask", "Preparing question context...");
+
+  if (options.stream) {
+    await runPrompt(options, prompt);
+    panel.done("ask", "Response streamed");
+  } else {
+    const answer = await callChatCompletion(options, prompt, panel, "ask");
+    panel.done("ask", `Complete (${answer.length} chars)`);
+    panel.finish();
+    console.log(answer);
+  }
 }
 
 async function planChange(options: CliOptions): Promise<void> {
@@ -505,12 +523,22 @@ async function planChange(options: CliOptions): Promise<void> {
     "Create a safe implementation plan. Do not modify files. Include affected files, semantic-map updates, risks, and verification steps.",
     request
   );
-  const plan = await runPromptCapture(options, prompt);
+
+  const panel = new MissionPanel();
+  panel.add("plan", "Generating implementation plan...");
+
+  const plan = await runPromptCapture(options, prompt, panel, "plan");
+
   if (options.write) {
     writePlan(options, plan);
+    panel.done("plan", `Plan written to ${options.outPath}`);
+    panel.finish();
     console.log(`Wrote plan: ${normalizePath(relative(options.cwd, resolve(options.cwd, options.outPath)))}`);
     return;
   }
+
+  panel.done("plan", `Complete (${plan.length} chars)`);
+  panel.finish();
 
   if (!options.stream) {
     console.log(plan);
@@ -995,18 +1023,18 @@ async function runArchitectureScan(options: CliOptions, report: ScanReport): Pro
     ? readFileSync(resolve(options.cwd, options.mapPath), "utf8")
     : buildTemplate();
 
-  panel.add("coordinator", "Building inspection plan...");
+  panel.add("coordinator", "Building file inspection plan (coordinator)...");
   const inspectionPlan = await buildInspectionPlan(options, report, existingMap, panel);
   panel.done("coordinator", "Inspection plan ready");
 
   const chunks = splitFilesForAgents(report.files, options.parallel);
   for (let i = 0; i < chunks.length; i++) {
-    panel.add(`reviewer ${i + 1}`, "Queued...");
+    panel.add(`reviewer ${i + 1}`, "Waiting to inspect files...");
   }
 
   const reviews = await runReviewerAgents(options, chunks, inspectionPlan, panel);
 
-  panel.add("merger", "Merging review results...");
+  panel.add("merger", "Merging all reviewer outputs into semantic map...");
 
   const prompt = `You are Codetalker running an architecture scan.
 
@@ -1242,7 +1270,7 @@ async function callChatCompletion(options: CliOptions, prompt: string, panel?: M
   const config = readConfig(options);
   const endpoint = `${trimTrailingSlash(config.apiUrl)}/chat/completions`;
   const progress = panel && agentId
-    ? makePanelProgress(panel, agentId)
+    ? makePanelProgress(panel, agentId, `Calling ${config.model}`)
     : startModelProgress(config.model, endpoint);
 
   try {
@@ -1304,14 +1332,16 @@ function showTokenUsage(usage: TokenUsage | undefined): void {
   process.stderr.write(`[tokens] Input: ${promptPart}${cachePart}, Output: ${outputPart}, Total: ${totalPart}\n`);
 }
 
-function makePanelProgress(panel: MissionPanel, agentId: string): (message: string | undefined) => void {
+function makePanelProgress(panel: MissionPanel, agentId: string, taskLabel: string = "Processing"): (message: string | undefined) => void {
   let active = true;
   let tick = 0;
+
+  panel.update(agentId, `${taskLabel} (sending request...)`);
 
   const timer = setInterval(() => {
     if (!active) return;
     tick += 1;
-    panel.update(agentId, `Waiting for response (${tick * 5}s elapsed)...`);
+    panel.update(agentId, `${taskLabel} (${tick * 5}s elapsed...)`);
   }, 5000);
 
   return (message: string | undefined): void => {
@@ -1500,7 +1530,7 @@ async function execution(options: CliOptions): Promise<void> {
   const mapPathResolved = resolve(options.cwd, options.mapPath);
   const currentMap = existsSync(mapPathResolved) ? readFileSync(mapPathResolved, "utf8") : "(no map)";
 
-  panel.add("coordinator", "Analyzing plan and identifying files to change...");
+  panel.add("coordinator", "Analyzing plan to identify files and change specs...");
 
   // Phase 1: Coordinator extracts affected files and change specs
   const coordinatorPrompt = createExecCoordPrompt(plan, currentMap, options);
@@ -1515,7 +1545,7 @@ async function execution(options: CliOptions): Promise<void> {
 
   // Phase 2: For each file, generate new content in parallel
   for (let i = 0; i < fileSpecs.length; i++) {
-    panel.add(`editor ${i + 1}`, `Queued: ${fileSpecs[i].filePath}`);
+    panel.add(`editor ${i + 1}`, `Waiting: ${fileSpecs[i].filePath}`);
   }
 
   const tasks = fileSpecs.map((spec, index) => async () => {
@@ -1525,7 +1555,7 @@ async function execution(options: CliOptions): Promise<void> {
     const filePath = resolve(options.cwd, spec.filePath);
     const fileContent = existsSync(filePath) ? readFileSync(filePath, "utf8") : "(new file)";
 
-    panel.update(agentId, `Generating changes for ${spec.filePath}...`);
+    panel.update(agentId, `Asking LLM to generate new code for ${spec.filePath}...`);
     const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan);
     const newContent = await callChatCompletion(options, editorPrompt, panel, agentId);
 
