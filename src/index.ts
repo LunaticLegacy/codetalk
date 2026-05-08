@@ -10,6 +10,7 @@ type CliOptions = {
   cwd: string;
   mapPath: string;
   outPath: string;
+  planPath: string;
   json: boolean;
   stream: boolean;
   llm: boolean;
@@ -223,7 +224,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  // todo: implement this.
   if (command === "exec") {
     await execution(options);
     return;
@@ -246,6 +246,7 @@ function parseOptions(args: string[]): CliOptions {
   let cwd = process.cwd();
   let mapPath = DEFAULT_MAP_PATH;
   let outPath = DEFAULT_PLAN_PATH;
+  let planPath = DEFAULT_PLAN_PATH;
   let json = false;
   let stream = false;
   let llm = false;
@@ -266,6 +267,11 @@ function parseOptions(args: string[]): CliOptions {
 
     if (arg === "--map") {
       mapPath = args[++index] ?? DEFAULT_MAP_PATH;
+      continue;
+    }
+
+    if (arg === "--plan") {
+      planPath = args[++index] ?? DEFAULT_PLAN_PATH;
       continue;
     }
 
@@ -317,7 +323,7 @@ function parseOptions(args: string[]): CliOptions {
     operands.push(arg);
   }
 
-  return { cwd, mapPath, outPath, json, stream, llm, write, parallel: normalizeParallel(parallel), apiUrl, apiKey, model, message: operands.join(" ").trim() };
+  return { cwd, mapPath, outPath, planPath, json, stream, llm, write, parallel: normalizeParallel(parallel), apiUrl, apiKey, model, message: operands.join(" ").trim() };
 }
 
 function printVersion(): void {
@@ -332,10 +338,11 @@ Usage:
   codetalker config
   codetalker config set --api-url URL --api-key KEY [--model MODEL]
   codetalker config show
-  codetalker scan [--json] [--llm] [--write] [--stream] [--parallel 4]
+  codetalker scan [--write] [--stream] [--parallel 4]
   codetalker map [--map CODEMAP.md]
   codetalker ask "How does auth work?" [--stream]
   codetalker plan "Add magic-link login" [--stream] [--write] [--out CODEPLAN.md]
+  codetalker exec [--plan CODEPLAN.md] [--parallel 4] [--stream]
   codetalker sync [--map CODEMAP.md] [--llm] [--stream]
   codetalker check [--map CODEMAP.md]
   codetalker version
@@ -343,10 +350,11 @@ Usage:
 Commands:
   init    Create a semantic map template if one does not exist
   config  Manually enter and store API URL, API key, and model
-  scan    Inspect source locally; with --llm, use parallel reviewers
+  scan    Run parallel LLM reviewers to produce architecture semantics (--llm is implied)
   map     Generate a baseline semantic map from the current repo shape
   ask     Ask a codebase question using the semantic map as context
   plan    Generate an implementation plan; with --write, save it to disk
+  exec    Execute a CODEPLAN.md: apply all file changes in parallel via LLM
   sync    Sync observed code changes back into the semantic map; does not execute plans
   check   Fail if the semantic map is missing or older than source files
   version Print version and exit
@@ -355,14 +363,16 @@ User guide:
   Need to start a repo        codetalker init
   Need to configure API       codetalker config
   Need repo understanding     codetalker scan
-  Need architecture on disk   codetalker scan --llm --write
-  Need larger repo scan       codetalker scan --llm --write --parallel 8
+  Need architecture on disk   codetalker scan --write
+  Need larger repo scan       codetalker scan --parallel 8
   Need a semantic map         codetalker map
   Need to ask about code      codetalker ask "question"
   Need streaming answers      codetalker ask "question" --stream
   Need a change plan          codetalker plan "request"
   Need streaming plans        codetalker plan "request" --stream
   Need plan on disk           codetalker plan "request" --write
+  Need to execute a plan     codetalker exec
+  Need parallel execution    codetalker exec --parallel 8
   Need to sync after edits    codetalker sync
   Need sync progress          codetalker sync --stream
   Need semantic sync          codetalker sync --llm --stream
@@ -425,15 +435,14 @@ function initMap(options: CliOptions): void {
 }
 
 async function scanRepo(options: CliOptions): Promise<void> {
+  if (!options.llm) {
+    fail("scan without --llm is no longer supported. Use \"codetalker scan --llm\" for LLM-based architecture analysis.");
+  }
+
   const report = buildScanReport(options);
 
   if (options.json) {
     console.log(JSON.stringify(report, null, 2));
-    return;
-  }
-
-  if (!options.llm) {
-    console.log(formatScan(report));
     return;
   }
 
@@ -1478,8 +1487,162 @@ function writeConfig(config: CodetalkerConfig): void {
   writeFileSync(path, JSON.stringify(config, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
 }
 
-async function execution(_options: CliOptions): Promise<void> {
-  fail("exec command is not yet implemented.");
+async function execution(options: CliOptions): Promise<void> {
+  const planPath = resolve(options.cwd, options.planPath);
+  if (!existsSync(planPath)) {
+    fail(`Plan file not found: ${options.planPath}. Run "codetalker plan" first.`);
+  }
+
+  const panel = new MissionPanel();
+  const plan = readFileSync(planPath, "utf8");
+
+  // Read current map for context
+  const mapPathResolved = resolve(options.cwd, options.mapPath);
+  const currentMap = existsSync(mapPathResolved) ? readFileSync(mapPathResolved, "utf8") : "(no map)";
+
+  panel.add("coordinator", "Analyzing plan and identifying files to change...");
+
+  // Phase 1: Coordinator extracts affected files and change specs
+  const coordinatorPrompt = createExecCoordPrompt(plan, currentMap, options);
+  const coordinatorResult = await callChatCompletion(options, coordinatorPrompt, panel, "coordinator");
+
+  const fileSpecs = parseExecChangeSpecs(coordinatorResult);
+  if (fileSpecs.length === 0) {
+    fail("Coordinator could not identify any files to change from the plan.");
+  }
+
+  panel.done("coordinator", `Identified ${fileSpecs.length} file${fileSpecs.length === 1 ? "" : "s"} to edit`);
+
+  // Phase 2: For each file, generate new content in parallel
+  for (let i = 0; i < fileSpecs.length; i++) {
+    panel.add(`editor ${i + 1}`, `Queued: ${fileSpecs[i].filePath}`);
+  }
+
+  const tasks = fileSpecs.map((spec, index) => async () => {
+    const agentId = `editor ${index + 1}`;
+    panel.update(agentId, `Reading ${spec.filePath}...`);
+
+    const filePath = resolve(options.cwd, spec.filePath);
+    const fileContent = existsSync(filePath) ? readFileSync(filePath, "utf8") : "(new file)";
+
+    panel.update(agentId, `Generating changes for ${spec.filePath}...`);
+    const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan);
+    const newContent = await callChatCompletion(options, editorPrompt, panel, agentId);
+
+    return {
+      filePath: spec.filePath,
+      originalContent: fileContent,
+      newContent,
+      action: existsSync(filePath) ? "modified" : "created"
+    };
+  });
+
+  const results = await runLimited(tasks, options.parallel);
+
+  // Phase 3: Apply all changes
+  panel.add("apply", "Writing changes to disk...");
+  let changedCount = 0;
+  for (const result of results) {
+    const target = resolve(options.cwd, result.filePath);
+    ensureParentDirectory(target);
+    writeFileSync(target, result.newContent, "utf8");
+    changedCount++;
+  }
+  panel.done("apply", `Applied changes to ${changedCount} file${changedCount === 1 ? "" : "s"}`);
+  panel.finish();
+
+  // Report to stdout
+  console.log(`Executed plan: ${options.planPath}`);
+  console.log(`Changed ${changedCount} file${changedCount === 1 ? "" : "s"}:`);
+  for (const result of results) {
+    const label = result.action === "modified" ? "M" : "A";
+    console.log(`  ${label} ${result.filePath}`);
+  }
+}
+
+function createExecCoordPrompt(plan: string, currentMap: string, options: CliOptions): string {
+  return `You are Codetalker execution coordinator.
+
+Goal:
+- Analyze the implementation plan below and identify every source file that needs to be created or modified.
+- For each file, provide a short but precise description of the changes needed.
+
+Rules:
+- Return a structured list. Format each line as:
+    FILE: <relative-path>
+    CHANGE: <concise description of what to add/remove/modify>
+  Separate each file entry with a blank line.
+- Only list files that actually exist in the codebase or need to be created.
+- Use relative file paths (e.g., src/index.ts).
+
+Current semantic map (for context):
+${currentMap}
+
+Implementation plan:
+${plan}`;
+}
+
+function createExecEditorPrompt(filePath: string, changeDescription: string, currentContent: string, plan: string): string {
+  return `You are Codetalker file editor.
+
+Goal:
+- Modify the file ${filePath} according to the change description below.
+- Return the COMPLETE new file content. Do NOT truncate or use placeholders.
+- Preserve all existing code that does not need to change.
+- If the file is new (no existing content), create it from scratch.
+
+Change description for ${filePath}:
+${changeDescription}
+
+Original content of ${filePath}:
+${currentContent}
+
+Relevant excerpt from implementation plan:
+${plan}
+
+Return ONLY the complete new file content. No explanations, no markdown fences.`;
+}
+
+function parseExecChangeSpecs(coordinatorOutput: string): Array<{ filePath: string; description: string }> {
+  const specs: Array<{ filePath: string; description: string }> = [];
+  let currentPath = "";
+  let currentDesc = "";
+
+  for (const line of coordinatorOutput.split(/\r?\n/)) {
+    const fileMatch = line.match(/^FILE:\s*(.+)$/i);
+    const changeMatch = line.match(/^CHANGE:\s*(.+)$/i);
+
+    if (fileMatch) {
+      // Save previous entry
+      if (currentPath && currentDesc) {
+        specs.push({ filePath: currentPath, description: currentDesc });
+      }
+      currentPath = fileMatch[1].trim();
+      currentDesc = "";
+    } else if (changeMatch) {
+      currentDesc = changeMatch[1].trim();
+    }
+  }
+
+  // Save last entry
+  if (currentPath && currentDesc) {
+    specs.push({ filePath: currentPath, description: currentDesc });
+  }
+
+  // Fallback: if no FILE:/CHANGE: lines, use the whole output as one spec
+  if (specs.length === 0 && coordinatorOutput.trim()) {
+    // Try to extract from markdown: ### filename sections
+    const mdFiles = coordinatorOutput.matchAll(/^#{1,3}\s+([^\n]+)\n([\s\S]*?)(?=\n#{1,3}\s|$)/gm);
+    for (const match of mdFiles) {
+      const path = match[1].trim().replace(/^`|`$/g, "").trim();
+      const desc = match[2].trim();
+      if (path && desc) {
+        specs.push({ filePath: path, description: desc });
+      }
+    }
+  }
+
+  return specs;
 }
 
 function configPath(): string {

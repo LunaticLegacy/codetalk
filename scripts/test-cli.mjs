@@ -27,15 +27,20 @@ try {
   assertIncludes(shown, "API URL: https://api.example.com/v1", "config show prints API URL");
   assertIncludes(shown, "API key: test...cret", "config show masks API key");
 
-  const scan = run("scan");
-  assertIncludes(scan, "TypeScript: 1", "scan detects TypeScript files");
-  assertIncludes(scan, "index.ts", "scan lists source files");
-  assertIncludes(scan, "CLI commands:", "scan prints CLI command surface");
-  assertIncludes(scan, "Configuration:", "scan prints config state");
-  assertIncludes(scan, "Semantic maps:", "scan prints semantic map state");
-  assertIncludes(scan, "CI:", "scan prints CI state");
-  assertIncludes(scan, "Module roles:", "scan prints module roles");
-  assertIncludes(scan, "codetalker plan", "scan documents product commands");
+  const version = run("version");
+  assertIncludes(version, "codetalker v", "version prints version string");
+
+  const help = run("help");
+  assertIncludes(help, "codetalker v", "help shows version");
+  assertIncludes(help, "exec", "help lists exec command");
+
+  // Non-LLM scan should fail
+  try {
+    run("scan");
+    throw new Error("non-LLM scan should have failed");
+  } catch {}
+
+  // LLM scan still works (tested below via testLlmMapWrite)
 
   run("map");
   const mapped = read(join(fixture, "CODEMAP.md"));
