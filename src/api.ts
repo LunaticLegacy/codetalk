@@ -1,8 +1,8 @@
 import type { CliOptions, TokenUsage } from "./types.js";
 import { MissionPanel } from "./panel.js";
 import { trimTrailingSlash, fail, readConfig } from "./utils.js";
-import type { ToolDef, ToolResult } from "./tools.js";
-import { executeTool } from "./tools.js";
+import type { ToolDef, ToolResult } from "./tools/index.js";
+import { executeTool } from "./tools/index.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 180_000;
 
@@ -348,6 +348,17 @@ export function parseToolCall(content: string): { toolName: string; args: Record
   return null;
 }
 
+/** Format tool arguments into a short summary for the panel. */
+function formatToolArgs(args: Record<string, any>): string {
+  // Show the most important arg (path, pattern, or first value)
+  if (args.path) return args.path;
+  if (args.pattern) return `/${args.pattern}/`;
+  if (args.count) return `last ${args.count}`;
+  const entries = Object.entries(args);
+  if (entries.length === 0) return "";
+  return `${entries[0][0]}: ${String(entries[0][1]).slice(0, 60)}`;
+}
+
 /** Build a tool-definition block for the system prompt. */
 export function buildToolDefinitions(tools: ToolDef[]): string {
   const lines: string[] = [];
@@ -396,16 +407,17 @@ export async function callWithTools(
     : startModelProgress(readConfig(options).model, "tool-calling");
 
   for (let turn = 0; turn < maxTurns; turn++) {
-    const detailStr = `Tool turn ${turn + 1}/${maxTurns}`;
-    progress(detailStr);
-
-    const { content } = await callChatCompletionMessages(options, messages, panel, agentId, detailStr);
+    const { content } = await callChatCompletionMessages(options, messages, panel, agentId, `Tool turn ${turn + 1}/${maxTurns}`);
 
     const toolCall = parseToolCall(content);
     if (!toolCall) {
       progress(undefined);
       return content;
     }
+
+    // Show tool-specific detail in panel
+    const argsSummary = formatToolArgs(toolCall.args);
+    panel?.update(agentId || "", `Tool: ${toolCall.toolName} ${argsSummary}`);
 
     const result = executeTool(toolCall.toolName, toolCall.args, options.cwd);
     const resultXml = result.success

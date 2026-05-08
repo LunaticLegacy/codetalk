@@ -8,7 +8,7 @@ import { createInterface } from "node:readline/promises";
 import type { CliOptions, CodetalkerConfig, ScanReport, SourceFile } from "./types.js";
 import { MissionPanel } from "./panel.js";
 import { callChatCompletion, callWithTools, runPrompt, runPromptCapture } from "./api.js";
-import { ALL_TOOLS } from "./tools.js";
+import { ALL_TOOLS } from "./tools/index.js";
 import {
   buildMap,
   buildTemplate,
@@ -526,9 +526,18 @@ ${map}`;
   panel.add("ask", "Exploring codebase with tools...");
 
   if (options.stream) {
-    const answer = await callWithTools(options, systemPrompt, question, ALL_TOOLS, panel, "ask");
+    // Streaming: use old direct prompt (tools not suitable for streaming)
+    const prompt = `You are analyzing a codebase.
+
+Semantic contract path: ${options.mapPath}
+
+Semantic contract:
+${map}
+
+User request:
+${question}`;
+    await runPrompt(options, prompt);
     panel.done("ask", "Response streamed");
-    console.log(answer);
   } else {
     const answer = await callWithTools(options, systemPrompt, question, ALL_TOOLS, panel, "ask");
     panel.done("ask", `Complete (${answer.length} chars)`);
@@ -549,8 +558,26 @@ Semantic contract:
 ${map}`;
 
   const panel = new MissionPanel();
-  panel.add("plan", "Exploring codebase with tools...");
 
+  if (options.stream) {
+    // Streaming: use old prompt path (tools not suitable for streaming)
+    panel.add("plan", "Generating implementation plan...");
+    const prompt = `You are creating a safe implementation plan.
+
+Semantic contract:
+${map}
+
+User request:
+${request}`;
+    const plan = await runPromptCapture(options, prompt, panel, "plan");
+    writePlan(options, plan);
+    panel.done("plan", `Plan written to ${options.outPath}`);
+    panel.finish();
+    console.log(`Wrote plan: ${normalizePath(relative(options.cwd, resolve(options.cwd, options.outPath)))}`);
+    return;
+  }
+
+  panel.add("plan", "Exploring codebase with tools...");
   const plan = await callWithTools(options, systemPrompt, request, ALL_TOOLS, panel, "plan");
 
   writePlan(options, plan);
