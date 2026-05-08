@@ -884,10 +884,6 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
     ? readFileSync(resolve(options.cwd, options.mapPath), "utf8")
     : buildTemplate();
 
-  panel.add("coordinator", "Building file inspection plan (coordinator)...");
-  const { content: inspectionPlan, tokenStr: coordTokens } = await buildInspectionPlan(options, report, existingMap, panel);
-  panel.done("coordinator", `Inspection plan ready${coordTokens}`);
-
   panel.add("indexer", "Extracting symbols via AST...");
   const astIndex = buildSymbolIndex(options.cwd);
   saveIndex(options.cwd, astIndex);
@@ -918,7 +914,7 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
     const sectionTasks = sections.map((section) => async () => {
       const agentId = `section:${sectionSlug(section)}`;
       panel.update(agentId, `Writing...`);
-      const sectionPrompt = mergerPrompt(existingMap, formatScan(report), inspectionPlan, indexBlock, options.mapPath, depth, section);
+      const sectionPrompt = mergerPrompt(existingMap, formatScan(report), "", indexBlock, options.mapPath, depth, section);
       const { content } = await callChatCompletion(options, sectionPrompt, panel, agentId, section);
       panel.done(agentId, `Written`);
       return `## ${section}\n\n${content.trim()}`;
@@ -927,7 +923,7 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
     const sectionResults = await runLimited(sectionTasks, 6);
     result = `# Code Semantic Map\n\n${sectionResults.join("\n\n")}`;
   } else {
-    const prompt = mergerPrompt(existingMap, formatScan(report), inspectionPlan, indexBlock, options.mapPath, depth);
+    const prompt = mergerPrompt(existingMap, formatScan(report), "", indexBlock, options.mapPath, depth);
     const { content: mapResult, tokenStr: mergerTokens } = await callChatCompletion(options, prompt, panel, "merger", "Synthesizing map");
     result = sanitizeMarkdownMap(mapResult);
     panel.done("merger", "Semantic map generated");

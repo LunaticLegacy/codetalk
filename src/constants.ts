@@ -58,7 +58,7 @@ export const COMMANDS = [
   { command: "codetalk help", purpose: "Show commands and user workflow." },
   { command: "codetalk init", purpose: "Create a semantic map template." },
   { command: "codetalk config", purpose: "Configure API URL, API key, and model with an interactive menu." },
-  { command: "codetalk scan [--stream] [--parallel 4]", purpose: "Use parallel LLM reviewers to produce architecture semantics." },
+  { command: "codetalk scan [--depth low|medium|high|full] [--timeout MS]", purpose: "Analyze repository and produce a living semantic map." },
   { command: "codetalk map", purpose: "Generate a baseline semantic map from repository structure." },
   { command: "codetalk ask \"message\" [--stream]", purpose: "Answer codebase questions from map and scan context." },
   { command: "codetalk plan \"request\" [--stream] [--out CODEPLAN.md]", purpose: "Generate a safe implementation plan and write it to disk." },
@@ -148,12 +148,11 @@ Flags:
     scan: `codetalk scan - Run parallel LLM reviewers to produce architecture semantics
 
 Usage:
-  codetalk scan [--json] [--stream] [--parallel N] [--depth low|medium|high|full] [--timeout MS]
+  codetalk scan [--json] [--depth low|medium|high|full] [--timeout MS]
 
 Flags:
   --json          Output scan report as JSON
-  --stream        Stream LLM responses in real time
-  --parallel N    Number of parallel reviewer agents (default: 4)
+  --depth LVL     Scan depth (low|medium|high|full, default: medium)
   --depth LEVEL   Scan depth: low, medium, high, or full (default: medium)
   --timeout MS    API request timeout in milliseconds (default: 180000)
   --cwd PATH      Working directory
@@ -241,7 +240,7 @@ Usage:
   codetalk config
   codetalk config set --api-url URL --api-key KEY [--model MODEL]
   codetalk config show
-  codetalk scan [--json] [--stream] [--parallel 4] [--depth low|medium|high|full] [--timeout MS]
+  codetalk scan [--json] [--depth low|medium|high|full] [--timeout MS]
   codetalk map [--map CODEMAP.md]
   codetalk ask "How does auth work?" [--stream]
   codetalk plan "Add magic-link login" [--stream] [--out CODEPLAN.md]
@@ -268,7 +267,7 @@ User guide:
   Need to start a repo        codetalk init
   Need to configure API       codetalk config
   Need repo understanding     codetalk scan
-  Need larger repo scan       codetalk scan --parallel 8
+  Need deeper repo scan      codetalk scan --depth high
   Need a semantic map         codetalk map
   Need to ask about code      codetalk ask "question"
   Need a change plan          codetalk plan "request"
