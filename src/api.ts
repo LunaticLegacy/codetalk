@@ -170,14 +170,11 @@ export function flushStreamEvents(buffer: string): { remainder: string; content:
 export function formatTokenUsage(usage: TokenUsage | undefined): string {
   if (!usage) return "";
 
-  const promptPart = `↑${usage.prompt_tokens}`;
-  const cachePart = usage.prompt_tokens_details?.cached_tokens
-    ? ` (cache hit: ${usage.prompt_tokens_details.cached_tokens}, cache miss: ${usage.prompt_tokens - usage.prompt_tokens_details.cached_tokens})`
-    : "";
-  const outputPart = `↓${usage.completion_tokens}`;
-  const totalPart = `${usage.total_tokens}`;
+  const cached = usage.prompt_tokens_details?.cached_tokens ?? 0;
+  const uncached = usage.prompt_tokens - cached;
+  const cachePart = ` (cache hit: ${cached}, cache miss: ${uncached})`;
 
-  return ` [tokens: Input ${promptPart}${cachePart}, Output ${outputPart}, Total ${totalPart}]`;
+  return ` [tokens: Input ↑${usage.prompt_tokens}${cachePart}, Output ↓${usage.completion_tokens}, Total ${usage.total_tokens}]`;
 }
 
 export function showTokenUsage(usage: TokenUsage | undefined): void {
