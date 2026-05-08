@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { printHelp, printVersion } from "./constants.js";
+import { printHelp, printSubcommandHelp, printVersion } from "./constants.js";
 import {
   configure,
   initMap,
@@ -18,9 +18,14 @@ async function main(): Promise<void> {
   const rawArgs = process.argv.slice(2);
   const [command = "help", ...rest] = rawArgs;
 
-  // --help / -h on any subcommand prints the full help
-  if (command === "help" || command === "--help" || command === "-h" || rest.includes("--help") || rest.includes("-h")) {
+  // --help / -h on a recognized subcommand shows subcommand-specific help
+  if (command === "help" || command === "--help" || command === "-h") {
     printHelp();
+    return;
+  }
+
+  if (rest.includes("--help") || rest.includes("-h")) {
+    printSubcommandHelp(command);
     return;
   }
 

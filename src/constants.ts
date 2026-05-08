@@ -62,6 +62,124 @@ export function printVersion(): void {
   console.log(`codetalk v${VERSION}`);
 }
 
+export function printSubcommandHelp(command: string): void {
+  const helps: Record<string, string> = {
+    init: `codetalk init - Create a semantic map template
+
+Usage:
+  codetalk init [--map CODEMAP.md]
+
+Flags:
+  --map PATH  Path to the semantic map (default: CODEMAP.md)`,
+
+    config: `codetalk config - Configure API URL, API key, and model
+
+Usage:
+  codetalk config
+  codetalk config set --api-url URL --api-key KEY [--model MODEL]
+  codetalk config show
+
+Flags:
+  --api-url URL   LLM API endpoint
+  --api-key KEY   LLM API key
+  --model MODEL   LLM model name (default: gpt-4.1)`,
+
+    scan: `codetalk scan - Run parallel LLM reviewers to produce architecture semantics
+
+Usage:
+  codetalk scan [--json] [--stream] [--parallel N]
+
+Flags:
+  --json          Output scan report as JSON
+  --stream        Stream LLM responses in real time
+  --parallel N    Number of parallel reviewer agents (default: 4)
+  --cwd PATH      Working directory
+  --api-url URL   LLM API endpoint
+  --api-key KEY   LLM API key
+  --model MODEL   LLM model name`,
+
+    map: `codetalk map - Generate a baseline semantic map from repo structure
+
+Usage:
+  codetalk map [--map CODEMAP.md]
+
+Flags:
+  --map PATH  Path to write the semantic map (default: CODEMAP.md)`,
+
+    ask: `codetalk ask - Answer codebase questions using LLM
+
+Usage:
+  codetalk ask "your question" [--stream]
+
+Flags:
+  --stream        Stream LLM response in real time
+  --cwd PATH      Working directory
+  --api-url URL   LLM API endpoint
+  --api-key KEY   LLM API key
+  --model MODEL   LLM model name`,
+
+    plan: `codetalk plan - Generate an implementation plan using LLM and write to disk
+
+Usage:
+  codetalk plan "change request" [--stream] [--out FILE]
+
+Flags:
+  --stream        Stream LLM response in real time
+  --out FILE      Plan output path (default: CODEPLAN.md)
+  --cwd PATH      Working directory
+  --api-url URL   LLM API endpoint
+  --api-key KEY   LLM API key
+  --model MODEL   LLM model name`,
+
+    exec: `codetalk exec - Execute a CODEPLAN.md: apply file changes in parallel via LLM
+
+Usage:
+  codetalk exec [--plan FILE] [--parallel N] [--stream]
+
+Flags:
+  --plan FILE     Plan file to execute (default: CODEPLAN.md)
+  --parallel N    Number of parallel file editors (default: 4)
+  --stream        Stream LLM responses in real time
+  --cwd PATH      Working directory
+  --api-url URL   LLM API endpoint
+  --api-key KEY   LLM API key
+  --model MODEL   LLM model name`,
+
+    sync: `codetalk sync - Sync observed code changes into the semantic map via LLM
+
+Usage:
+  codetalk sync [--map CODEMAP.md] [--stream]
+
+Flags:
+  --map PATH      Path to the semantic map (default: CODEMAP.md)
+  --stream        Stream LLM response in real time
+  --cwd PATH      Working directory
+  --api-url URL   LLM API endpoint
+  --api-key KEY   LLM API key
+  --model MODEL   LLM model name`,
+
+    check: `codetalk check - Fail if the semantic map is missing or older than source files
+
+Usage:
+  codetalk check [--map CODEMAP.md]
+
+Flags:
+  --map PATH  Path to the semantic map (default: CODEMAP.md)`,
+
+    version: `codetalk version - Print version and exit
+
+Usage:
+  codetalk version`
+  };
+
+  const text = helps[command];
+  if (text) {
+    console.log(text);
+  } else {
+    printHelp();
+  }
+}
+
 export function printHelp(): void {
   console.log(`codetalk v${VERSION} - maintain a living semantic map for agentic code changes
 
