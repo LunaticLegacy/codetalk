@@ -1,186 +1,122 @@
-<div align="center">
+# Code Semantic Sync
 
-# 🗺️ 码语者.SKILL
+`codetalker` 是一个基于语义图工作的 AI coding CLI。
 
-> *先读懂代码，再把理解同步回去。*
+它维护项目内的 `CODEMAP.md`，让 AI agent 在改代码前先读取语义契约，基于该契约理解、规划和修改代码，并在代码变化后把真实行为同步回语义图。它不是单纯的文档生成器，文档不是终点，而是下一次代码修改的语义基础。
 
-[![Skill](https://img.shields.io/badge/🤖%20Codex-Skill-8b5cf6?style=flat-square)](SKILL.md)
-[![Docs](https://img.shields.io/badge/📝%20Docs-Markdown-3b82f6?style=flat-square)](references/repo-semantic-map.md)
-[![Template](https://img.shields.io/badge/📋%20Template-Semantic%20Map-10b981?style=flat-square)](references/semantic-map-template.md)
-[![License](https://img.shields.io/badge/License-MIT-f59e0b?style=flat-square)]()
-
-<br>
-
-当你接手一个陌生仓库、改完一段逻辑，或者需要给团队补一份长期可维护的代码地图时，<br>
-**`码语者.SKILL`** 会帮你把"理解代码"和"记录理解"合并成一套工作流。
-
-<br>
-
-[它能做什么](#-它能做什么) · [适用人群](#-适用人群) · [工作流](#-工作流) · [安装](#-安装) · [使用方法](#-使用方法) · [注意事项](#-注意事项)
-
-</div>
-
----
-
-## 🎯 它能做什么
-
-`码语者.SKILL`（`code.semantic.sync`）是一个以 Markdown 为核心的 Skill，用于构建并维护一份**实时更新的代码语义地图**。
-
-简单来说，它能帮你：
-
-| 场景 | 能力 |
-|------|------|
-| 🧭 **理解仓库** | 编辑前快速建立代码上下文 |
-| 🔍 **捕获语义** | 记录函数和方法的实际行为（输入、输出、副作用） |
-| 🔄 **同步文档** | 代码变更后，在同一轮对话中更新语义地图 |
-| 🛡️ **拒绝过时** | 避免笔记与代码渐行渐远 |
-
-用一个心智模型来概括：
-
-> 把 *"我觉得这段代码是这样工作的"* 变成 *"这就是当前代码的实际运行地图"。*
-
----
-
-## 👤 适用人群
-
-- 👋 正在陌生仓库里开始工作的人
-- ✏️ 做了修改，希望文档保持诚实的人
-- 🔧 维护着大量变动模块的人
-- 🤖 希望 Codex 用可持续的方式解释代码的人
-
-如果你的第一个问题是 *"这个函数到底在做什么？"* 或者 *"这次修改改变了什么？"*，这个 Skill 就是为你准备的。
-
----
-
-## 📦 你能得到什么
-
-典型的输出包括：
-
-- 一份简短的**架构总览**
-- 一份**逐函数的语义地图**
-- 一份**副作用**、**数据流**和**依赖关系**的清单
-- 编辑后**同步更新**的语义地图
-
-**输出示例：**
-
-```md
-## 架构
-- 主入口：src/index.ts
-- 核心模块：parser, resolver, emitter
-
-## 函数
-- `parseConfig(input)`:
-  - 输入：`string | Buffer`
-  - 输出：`ConfigTree`
-  - 副作用：无
-  - 异常：语法无效时抛出 `ParseError`
-```
-
----
-
-## 🔄 工作流
-
-### 1️⃣ 先阅读
-
-> *不打无准备之仗。*
-
-- 定位相关的源文件
-- 尽可能**并行**读取文件级上下文
-- 在动手修改之前，先检查主要模块和类型
-
-### 2️⃣ 再映射
-
-> *先见森林，再见树木。*
-
-- 先总结**整体架构**
-- 记录每个函数或方法的**目的**、**输入**、**输出**、**副作用**和**失败模式**
-- 描述**实际观察到的行为**，而非仅凭意图推测
-
-### 3️⃣ 编辑后同步
-
-> *改完代码，同步理解。*
-
-- **重读**你修改过的文件
-- 在同一轮对话中**更新**语义地图
-- 反映**签名变更**、**副作用变化**和**兼容性影响**
-
----
-
-## 📂 输出物
-
-本仓库围绕三个核心制品展开：
-
-| 文件 | 用途 |
-|------|------|
-| [`SKILL.md`](SKILL.md) | Codex 使用的操作入口 |
-| [`agents/openai.yaml`](agents/openai.yaml) | Skill 列表与标签的 UI 元数据 |
-| [`references/semantic-map-template.md`](references/semantic-map-template.md) | 语义地图的默认 Markdown 结构模板 |
-
-此外，仓库自身也包含一份规范的语义地图：
-
-- [`references/repo-semantic-map.md`](references/repo-semantic-map.md) — 本仓库的自描述语义地图
-
----
-
-## ⚡ 安装
-
-### 安装到 Codex
-
-将此 Skill 文件夹复制到你的 Codex skills 目录：
+## 安装
 
 ```bash
-# 克隆或复制到 skills 目录
-git clone <你的仓库地址> ~/.codex/skills/code-semantic-sync
+npm install -D code-semantic-sync
 ```
 
-如果该文件夹已位于你正在工作的仓库内，可直接使用。
+推荐始终使用 `codetalker xxx` 的命令形态：
 
----
+```bash
+npx codetalker help
+```
 
-## 🚀 使用方法
+## 首次使用
 
-当你想要在编辑前**理解代码**，或在修改后**更新语义地图**时，触发此 Skill：
+1. 初始化语义图：
+
+```bash
+npx codetalker init
+```
+
+2. 手动输入 API URL、API key 和模型：
+
+```bash
+npx codetalker config
+```
+
+也可以非交互配置：
+
+```bash
+npx codetalker config set --api-url https://api.openai.com/v1 --api-key sk-xxx --model gpt-4.1
+```
+
+默认配置路径：
 
 ```text
-使用 $code-semantic-sync 检查相关源文件，总结架构，并在编辑后同步语义地图。
+~/.codetalker/config.json
 ```
 
-> 💡 **提示：** 编辑完成后，建议要求重新读取修改过的文件，以确保语义地图保持最新。
+也支持环境变量：
 
----
-
-## 🗂️ 项目结构
-
+```bash
+CODETALKER_API_URL=https://api.openai.com/v1
+CODETALKER_API_KEY=sk-xxx
+CODETALKER_MODEL=gpt-4.1
 ```
+
+## 用户使用方法表
+
+| 用户意图 | 命令 | 输出 |
+| --- | --- | --- |
+| 查看帮助 | `codetalker help` | 命令和使用表 |
+| 初始化仓库 | `codetalker init` | `CODEMAP.md` |
+| 配置 API | `codetalker config` | 本地 API URL、API key 和模型配置 |
+| 非交互配置 API | `codetalker config set --api-url URL --api-key KEY --model MODEL` | 本地 API 配置 |
+| 查看配置 | `codetalker config show` | 脱敏后的配置摘要 |
+| 本地扫描仓库 | `codetalker scan` | 源码、命令面、配置、语义图、CI、模块角色 |
+| 输出扫描 JSON | `codetalker scan --json` | 结构化仓库扫描结果 |
+| LLM 架构扫描 | `codetalker scan --llm` | 基于文件证据生成完整语义图文本 |
+| 架构落盘 | `codetalker scan --llm --write` | 将 LLM 生成的完整语义图写入 `CODEMAP.md` |
+| 并行架构扫描 | `codetalker scan --llm --write --parallel 8` | 使用 8 个并行 reviewer 分片检视文件后合并落盘 |
+| 生成基础语义图 | `codetalker map` | 基于仓库结构生成基础 `CODEMAP.md` |
+| 提问代码库 | `codetalker ask "How does auth work?"` | 基于语义图和仓库结构回答 |
+| 流式提问 | `codetalker ask "How does auth work?" --stream` | 增量输出回答 |
+| 规划修改 | `codetalker plan "Add magic-link login"` | 实施计划、风险、验证步骤 |
+| 流式规划 | `codetalker plan "Add magic-link login" --stream` | 增量输出计划 |
+| 计划落盘 | `codetalker plan "Add magic-link login" --write` | 写入默认 `CODEPLAN.md` |
+| 指定计划路径 | `codetalker plan "Add magic-link login" --write --out plans/auth.md` | 写入指定 Markdown 文件 |
+| 本地同步语义图 | `codetalker sync` | 更新 `CODEMAP.md` 的 Change Sync 段 |
+| 流式同步进度 | `codetalker sync --stream` | 输出本地同步进度 |
+| LLM 语义同步 | `codetalker sync --llm --stream` | 基于变更文件更新完整语义图并显示进度 |
+| CI 新鲜度检查 | `codetalker check` | 语义图缺失或比源码旧时返回非零 |
+
+## 推荐工作流
+
+```text
+codetalker init
+codetalker config
+codetalker scan --llm --write
+codetalker ask "How does this repo work?"
+codetalker plan "Add a new feature safely" --stream
+codetalker plan "Add a new feature safely" --write --out plans/next.md
+codetalker sync --llm --stream
+codetalker check
+```
+
+`codetalker scan` 默认不调用模型，适合快速本地结构检查。`codetalker scan --llm --write` 会先列出全部源码文件，再让 coordinator agent 制定检查计划，然后按 `--parallel` 分片创建多个 reviewer agent 并行检视文件，最后由 merger agent 合并为可落盘的完整 `CODEMAP.md`。`--parallel` 默认为 4，小于 1 时按 1 处理。
+
+`codetalker sync` 默认只刷新变更清单。`codetalker sync --llm` 会基于 git 变更文件和现有语义图，让模型返回完整更新版语义图，适合代码行为已经变化后的语义同步。
+
+非流式 LLM 任务不会静默等待。`ask`、`plan`、`scan --llm`、`sync --llm` 在不使用 `--stream` 时会向 stderr 输出开始、等待和完成提示；stdout 保留给结果文本或写入确认，便于脚本继续消费。
+
+`sync` 不执行 `plan`。当前边界是：`plan` 负责生成和落盘可审阅计划，未来的 `apply` 才负责按计划改代码，`sync` 只在代码已经变化后把真实行为同步回语义图。
+
+## API 兼容性
+
+`codetalker ask`、`codetalker plan`、`codetalker scan --llm` 和 `codetalker sync --llm` 使用 OpenAI-compatible `/chat/completions`：
+
+```text
+POST {apiUrl}/chat/completions
+Authorization: Bearer {apiKey}
+```
+
+用户手动配置 API URL 和 API key，因此可以使用 OpenAI 或兼容服务。
+
+## 仓库结构
+
+```text
 code-semantic-sync/
-├── SKILL.md                          # Skill 操作入口
-├── README.md                         # 本文件（中文）
-├── README_EN.md                      # 英文版说明
-├── agents/
-│   └── openai.yaml                   # UI 元数据与标签配置
-└── references/
-    ├── repo-semantic-map.md          # 本仓库的规范语义地图
-    └── semantic-map-template.md      # 可复用的语义地图模板
+  src/index.ts                         CLI 源码
+  dist/index.js                        构建后的 CLI 入口
+  scripts/test-cli.mjs                 CLI smoke test
+  SKILL.md                             Codex skill 工作流
+  agents/openai.yaml                   skill 元数据
+  references/repo-semantic-map.md      本仓库语义图
+  references/semantic-map-template.md  可复用语义图模板
 ```
-
----
-
-## 📝 注意事项
-
-- Markdown 便于浏览和版本管理
-- 模板刻意保持**轻量**和**可复用**
-- 本仓库**有意保持精简**：文档、元数据和规范语义地图
-- 与一次性笔记不同，此 Skill 旨在**每次代码变更时都能复用**
-- 目标不是写*更多*文档，而是让**一份可靠的地图始终与代码同步**
-
----
-
-<div align="center">
-
-### *为那些需要地图，而不仅仅是记忆的代码库而造。*
-
-<br>
-
-<sub>为 <a href="https://openai.com/codex">Codex</a> 而创 · 作为 Skill 包维护 · 码语者.SKILL</sub>
-
-</div>

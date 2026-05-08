@@ -1,0 +1,44 @@
+{
+  "name": "code-semantic-sync",
+  "version": "0.1.0",
+  "description": "Maintain a living semantic map that agents use to understand and safely modify code.",
+  "type": "module",
+  "bin": {
+    "codetalker": "./dist/index.js",
+    "code-semantic-sync": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "agents",
+    "references",
+    "SKILL.md",
+    "LICENSE",
+    "README.md",
+    "README_EN.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build",
+    "start": "node dist/index.js",
+    "test": "node scripts/test-cli.mjs"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "codex",
+    "code-understanding",
+    "semantic-map",
+    "documentation",
+    "cli",
+    "ai-coding"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "typescript": "^5.4.5"
+  }
+}

@@ -1,21 +1,28 @@
 ---
 name: code-semantic-sync
-description: Use when starting code work or after edits to read source files in parallel, summarize every function and class method, and keep a markdown semantic map synchronized with the codebase.
+description: Use when starting code work or after edits to read the repository semantic map, inspect source files in parallel, modify code according to the semantic contract, and keep the map synchronized with behavior.
 ---
 
 # Code Semantic Sync
 
 ## Positioning
 
-Use this skill to turn a codebase into a living semantic map.
+Use this skill to maintain a living semantic map that guides code changes.
 It is designed for code-understanding work, implementation follow-up, and
-documentation sync after every change.
+semantic sync after every behavior change.
+
+The semantic map is not passive documentation. It is the working contract an
+agent reads before editing code, uses while planning changes, and updates after
+the implementation changes behavior.
 
 ## Workflow
 
 ### 1. Read in parallel first
 
-- Start by locating the relevant source files and reading them in parallel.
+- Start by locating the canonical semantic map and reading it before editing.
+- For this repository, use [references/repo-semantic-map.md](references/repo-semantic-map.md).
+- In target repositories, prefer `CODEMAP.md` unless a canonical map path is already established.
+- Then locate the relevant source files and read them in parallel.
 - Prefer file-level scanning first, then targeted reads for the main modules.
 - Focus on:
   - each function and method
@@ -34,7 +41,18 @@ documentation sync after every change.
   - state or files it mutates
   - important preconditions and postconditions
 
-### 3. Keep the semantic text as markdown
+### 3. Modify code according to the semantic contract
+
+- Treat the semantic map as the current behavioral contract unless source inspection proves it stale.
+- When the map and source code disagree, trust observed code and repair the map before relying on it.
+- Before changing behavior, identify which map sections must change:
+  - module responsibilities
+  - function inputs, outputs, side effects, and failure modes
+  - runtime flow
+  - compatibility impact
+- Keep code edits and semantic-map updates in the same task whenever possible.
+
+### 4. Keep the semantic text as markdown
 
 - Keep the semantic document in markdown.
 - Prefer stable headings such as:
@@ -49,12 +67,60 @@ documentation sync after every change.
 - For this repository, use [references/repo-semantic-map.md](references/repo-semantic-map.md) as the canonical semantic map.
 - Use [references/semantic-map-template.md](references/semantic-map-template.md) as the default shape when no existing map exists.
 
-### 4. After edits, sync the semantics
+### 5. After edits, sync the semantics
 
 - After code edits, reread the modified files.
 - Update the semantic markdown in the same turn.
 - Reflect changed function behavior, signatures, side effects, and data flow.
 - If a change affects public APIs, note the compatibility impact explicitly.
+- If the CLI is available, use `codetalker sync` to refresh the change-sync checklist.
+
+## CLI Surface
+
+- `codetalker init`: create a semantic map template.
+- `codetalker config`: manually enter and store API URL, API key, and model.
+- `codetalker scan`: inspect source files and print a compact repository inventory.
+- `codetalker scan --llm --write`: list all source files, ask a coordinator agent for an inspection plan, run parallel reviewer agents over file shards, merge their outputs, and write a complete semantic map.
+- `codetalker map`: generate a baseline semantic map from repository structure.
+- `codetalker ask`: answer codebase questions using the semantic map and repository scan as context.
+- `codetalker plan`: generate implementation plans from the semantic map without modifying files.
+- `codetalker plan --write --out CODEPLAN.md`: write a generated implementation plan to disk.
+- `codetalker sync`: record changed files and refresh the map's sync checklist.
+- `codetalker sync --llm`: call the configured LLM to update the complete semantic map from changed files.
+- `codetalker check`: fail when the map is missing or older than source files.
+
+The public user experience should consistently use `codetalker xxx`.
+`code-semantic-sync` may remain as a package/bin compatibility alias, but user
+documentation should teach `codetalker`.
+Non-streaming LLM commands should still show progress on stderr so users know
+long-running work is active while stdout remains script-friendly.
+`sync` does not execute plans. `plan` creates reviewable instructions, future
+`apply` should perform code edits, and `sync` updates semantic maps after code
+behavior has actually changed.
+
+## User Usage Table
+
+| User intent | Command | Output |
+| --- | --- | --- |
+| Show help | `codetalker help` | Commands and usage table |
+| Initialize a repo | `codetalker init` | `CODEMAP.md` |
+| Configure API | `codetalker config` | Local API URL, API key, and model config |
+| Configure API non-interactively | `codetalker config set --api-url URL --api-key KEY --model MODEL` | Local API config |
+| Show config | `codetalker config show` | Masked config summary |
+| Scan repo | `codetalker scan` | Source, command surface, config, semantic maps, CI, module roles |
+| LLM architecture scan | `codetalker scan --llm` | Complete semantic map text generated from repository evidence |
+| Land architecture on disk | `codetalker scan --llm --write` | Updated `CODEMAP.md` |
+| Parallel architecture scan | `codetalker scan --llm --write --parallel 8` | Eight reviewer agents inspect file shards before merge |
+| Generate map | `codetalker map` | Baseline `CODEMAP.md` from repo structure |
+| Ask about code | `codetalker ask "How does auth work?"` | Answer grounded in the map and repo shape |
+| Ask with streaming output | `codetalker ask "How does auth work?" --stream` | Incremental answer as tokens arrive |
+| Plan a change | `codetalker plan "Add magic-link login"` | Implementation plan, risks, verification steps |
+| Plan with streaming output | `codetalker plan "Add magic-link login" --stream` | Incremental plan as tokens arrive |
+| Write plan to disk | `codetalker plan "Add magic-link login" --write --out plans/auth.md` | Markdown implementation plan |
+| Sync after edits | `codetalker sync` | Updated change-sync section |
+| Stream sync progress | `codetalker sync --stream` | Local sync progress while the map is updated |
+| Sync semantics with LLM | `codetalker sync --llm --stream` | Full semantic map updated from changed files with progress output |
+| CI freshness check | `codetalker check` | Nonzero exit when the map is missing or stale |
 
 ## Output Contract
 
@@ -67,5 +133,8 @@ documentation sync after every change.
 ## Repository Shape
 
 - `SKILL.md` is the operational entrypoint.
+- `package.json` publishes the npm CLI package.
+- `src/index.ts` implements the TypeScript CLI.
+- `dist/index.js` is the built executable entrypoint for npm.
 - `agents/openai.yaml` carries UI-facing metadata.
 - `references/semantic-map-template.md` defines the default semantic-map structure.
