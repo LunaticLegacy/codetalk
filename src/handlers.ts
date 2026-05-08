@@ -478,8 +478,7 @@ function providerLabel(id: string | undefined): string {
 // Scan
 
 export async function scanRepo(options: CliOptions): Promise<void> {
-  process.stderr.write("[codetalk] Scanning repository...\n");
-  const report = buildScanReport(options);
+  const report = buildScanReport(options, (msg) => process.stderr.write(`[codetalk] ${msg}\n`));
 
   if (options.json) {
     console.log(JSON.stringify(report, null, 2));

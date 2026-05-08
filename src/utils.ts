@@ -134,20 +134,34 @@ export function summarize(files: SourceFile[]): SourceSummary {
 
 // ── Scan report ───────────────────────────────────────────────────────────────
 
-export function buildScanReport(options: CliOptions): ScanReport {
+export function buildScanReport(options: CliOptions, onStage?: (msg: string) => void): ScanReport {
+  onStage?.("Collecting source files...");
   const files = collectSourceFiles(options.cwd);
   const source = summarize(files);
+
+  onStage?.("Reading project config...");
+  const packageInfo = scanPackageInfo(options.cwd);
+  const config = scanConfigState();
+
+  onStage?.("Checking CI configuration...");
+  const ci = scanCi(options.cwd);
+
+  onStage?.("Checking semantic maps...");
+  const semanticMaps = scanSemanticMaps(options);
+
+  onStage?.("Inferring module roles...");
+  const moduleRoles = inferModuleRoles(options.cwd, files);
 
   return {
     root: normalizePath(options.cwd),
     source,
     files,
     commands: COMMANDS,
-    config: scanConfigState(),
-    semanticMaps: scanSemanticMaps(options),
-    packageInfo: scanPackageInfo(options.cwd),
-    ci: scanCi(options.cwd),
-    moduleRoles: inferModuleRoles(options.cwd, files),
+    config,
+    semanticMaps,
+    packageInfo,
+    ci,
+    moduleRoles,
     git: {
       changedPaths: getChangedFiles(options.cwd).length
     }
