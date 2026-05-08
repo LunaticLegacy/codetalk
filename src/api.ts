@@ -413,12 +413,15 @@ export async function callWithTools(
     { role: "user", content: userMessage }
   ];
 
-  const progress = panel && agentId
+  const prog = panel && agentId
     ? makePanelProgress(panel, agentId, `Calling ${readConfig(options).model}`, "with tools")
     : startModelProgress(readConfig(options).model, "tool-calling");
+  const progress = prog as any;
 
   for (let turn = 0; turn < maxTurns; turn++) {
-    const { content } = await callChatCompletionMessages(options, messages, panel, agentId, `Tool turn ${turn + 1}/${maxTurns}`);
+    progress(`Thinking (turn ${turn + 1}/${maxTurns})...`);
+
+    const { content } = await callChatCompletionMessages(options, messages, panel, agentId, `Thinking (turn ${turn + 1}/${maxTurns})`);
 
     const toolCall = parseToolCall(content);
     if (!toolCall) {
@@ -426,9 +429,11 @@ export async function callWithTools(
       return content;
     }
 
-    // Show tool-specific detail in panel
+    // Show tool info via setDetail so the 100ms timer keeps showing it
     const argsSummary = formatToolArgs(toolCall.args);
-    panel?.update(agentId || "", `Tool: ${toolCall.toolName} ${argsSummary}`);
+    if (progress.setDetail) {
+      progress.setDetail(`Tool: ${toolCall.toolName} ${argsSummary}`);
+    }
 
     const result = executeTool(toolCall.toolName, toolCall.args, options.cwd);
     const resultXml = result.success
