@@ -2,8 +2,6 @@
 
 ## API Surface
 
-## API Surface
-
 ### CLI Commands
 
 All commands are invoked as `codetalk <command> [args] [flags]`. The `codetalk-cli` binary is an alias for `codetalk`.
@@ -13,7 +11,7 @@ All commands are invoked as `codetalk <command> [args] [flags]`. The `codetalk-c
 | `codetalk help` | Show commands and user workflow | – |
 | `codetalk init` | Create a semantic map template (`CODEMAP.md`) | – |
 | `codetalk config` | Configure API URL, API key, and model with an interactive menu | – |
-| `codetalk scan` | Use parallel LLM reviewers to produce architecture semantics | `--stream` (stream output), `--parallel <N>` (default `4`, max concurrency) |
+| `codetalk scan` | Analyze repository and produce a living semantic map using LLM reviewers | `--depth <low\|medium\|high\|full>` (scan depth, default: `full`), `--timeout <ms>` (API request timeout in milliseconds, default: `30000`) |
 | `codetalk map` | Generate a baseline semantic map from repository structure | – |
 | `codetalk ask "<message>"` | Answer codebase questions from map and scan context | `"<message>"` (required, positional), `--stream` |
 | `codetalk plan "<request>"` | Generate a safe implementation plan and write to disk | `"<request>"` (required, positional), `--stream`, `--out <file>` (default `CODEPLAN.md`) |
@@ -39,16 +37,7 @@ All internal modules (`src/api.ts`, `src/handlers.ts`, etc.) export functions us
 
 ## Classes
 
-## 2. Classes
-
-No JavaScript/TypeScript `class` definitions were identified in any source file. The entire codebase is implemented using plain functions, async functions, and interface/type declarations. The following structural constructs are present but are **not** classes:
-
-| Name | File | Nature | Details |
-|------|------|--------|---------|
-| `MissionPanel` | `src/panel.ts` | Type (interface) | Represents an interactive panel for the `ask` command; likely has methods for streaming output and reading input. |
-| `ProviderId` | `src/constants.ts` | Type alias (string union) | Represents supported LLM provider identifiers (e.g., `'openai'`, `'mcp'`). |
-
-No constructors, instances, or lifecycle exist for these constructs. All state is managed through plain object literals and function closures.
+No JavaScript/TypeScript `class` definitions were identified in any source file. The entire codebase is implemented using plain functions, async functions, and interface/type declarations. All state is managed through plain object literals and function closures. No constructors, instances, or lifecycle exist for any class constructs.
 
 ## Interfaces
 
@@ -140,7 +129,7 @@ The module uses yargs to define CLI commands and dispatches to handlers. No stan
 | `configure` | exported | – | `Promise<void>` | Reads/writes `~/.codetalker/config.json` | – | `readline/promises`, `utils.readConfig`, `utils.writeConfig`, `fs` | `src/index.ts` (config command) | Interactive API configuration prompt |
 | `scanRepo` | exported | `options?: CliOptions` | `Promise<ScanReport>` | LLM API calls, file reads, stdout output | Retryable on API failure | `api`, `indexer`, `prompts`, `tools`, `utils` | `src/index.ts` (scan command) | Run parallel LLM reviewers to analyze repository |
 | `writeMap` | exported | `report?: ScanReport` | `Promise<void>` | Writes `CODEMAP.md` | – | `indexer`, `utils.buildMap`, `fs` | `src/index.ts` (map command) | Generate/update semantic map from scan |
-| `syncMap` | exported | – | `Promise<void>` | Updates `CODEMAP.md` after exec | – | `api`, `prompts.semanticSyncPrompt`, `fs` | `execution` | Re-sync map after file changes |
+| `syncMap` | exported | – | `Promise<void>` | Updates `CODEMAP.md` after exec | – | `api`, `prompts.semanticSyncPrompt`, `fs` | `src/handlers.execution` | Re-sync map after file changes |
 | `askCodebase` | exported | `question: string`, `stream?: boolean` | `Promise<void>` | LLM API call, stdout output | – | `api`, `prompts.askSystemPrompt`, `panel` | `src/index.ts` (ask command) | Answer codebase questions |
 | `planChange` | exported | `request: string`, `stream?: boolean`, `out?: string` | `Promise<void>` | LLM API call, writes `CODEPLAN.md` | – | `api`, `prompts.planSystemPrompt`, `utils` | `src/index.ts` (plan command) | Generate implementation plan |
 | `checkMap` | exported | – | `Promise<void>` | Exits 0 or 1 | – | `utils.hasGit`, `utils.getChangedFiles` | `src/index.ts` (check command) | Validate map freshness |
@@ -257,7 +246,7 @@ All functions are exported, return types and side effects noted where apparent. 
 
 | Function | Visibility | Parameters | Return | Side Effects | Errors | External Calls | Called by | Semantic Role |
 |---|---|---|---|---|---|---|---|---|
-| `extractSymbols` | exported | `filePath: string`, `language: string` | `AstResult` (see `src/ast/types.ts`) | – | Unknown (delegates) | `./python.js`, `./ts.js` | `indexer.buildSymbolIndex` | Dispatch to language-specific AST extractor |
+| `extractSymbols` | exported | `filePath: string`, `language: string` | `AstResult` (see `src/ast/types.ts`) | – | Unknown (delegates) | `./python.js`, `./ts.js`, `./cpp.js`, `./asm.js` | `indexer.buildSymbolIndex` | Dispatch to language-specific AST extractor |
 
 ### `src/ast/python.ts` – Python AST extraction
 
@@ -269,7 +258,19 @@ All functions are exported, return types and side effects noted where apparent. 
 
 | Function | Visibility | Parameters | Return | Side Effects | Errors | External Calls | Called by | Semantic Role |
 |---|---|---|---|---|---|---|---|---|
-| `extractTs` | exported | `filePath: string` | `AstResult` | Reads file | – | `node:fs` | `extractSymbols` | Extract symbols from TypeScript file |
+| `extractTsAst` | exported | `filePath: string` | `AstResult` | Reads file | – | `node:fs` | `extractSymbols` | Extract symbols and exports from TypeScript file |
+
+### `src/ast/cpp.ts` – C/C++ AST extraction
+
+| Function | Visibility | Parameters | Return | Side Effects | Errors | External Calls | Called by | Semantic Role |
+|---|---|---|---|---|---|---|---|---|
+| `extractCpp` | exported | `code: string` | `AstResult` | – | – | `node:fs` | `extractSymbols` | Extract functions and classes from C/C++ source |
+
+### `src/ast/asm.ts` – Assembly AST extraction
+
+| Function | Visibility | Parameters | Return | Side Effects | Errors | External Calls | Called by | Semantic Role |
+|---|---|---|---|---|---|---|---|---|
+| `extractAsm` | exported | `code: string` | `AstResult` | – | – | `node:fs` | `extractSymbols` | Extract symbols and exports from assembly source |
 
 ### `src/tools/glob.ts` – File globbing tool
 
@@ -331,86 +332,87 @@ All functions are exported, return types and side effects noted where apparent. 
 
 ### Startup Flow
 
-1. User invokes `codetalk <command> [args]` in terminal.
-2. `src/index.ts` (yargs) parses command and arguments, calling `utils.parseOptions` to normalize CLI options.
-3. Commands that require API configuration (`scan`, `plan`, `exec`, `ask`, `map`) load `~/.codetalker/config.json` via `utils.readConfig`:
-   - If missing or invalid → print message suggesting `codetalk config` and exit 1.
-   - `scan` and `exec` also call `utils.tryReadConfig` as a fallback (non-fatal).
-4. Commands that require `CODEMAP.md` freshness (`plan`, `exec`, `ask`, `check`) verify map existence and staleness using `utils.hasGit` + `utils.getChangedFiles` (or modify timestamp comparison). If stale or missing → exit 1 with explanatory message.
+1. User invokes `codetalk <command> [args]` in terminal.  
+2. `src/index.ts` (yargs) parses command, arguments, and flags, calling `utils.parseOptions` to normalize `CliOptions`.  
+3. Commands requiring API configuration (`scan`, `plan`, `exec`, `ask`, `map`) load `~/.codetalker/config.json` via `utils.readConfig`:  
+   - If missing or invalid → print message suggesting `codetalk config` and exit 1.  
+   - `scan` and `exec` also call `utils.tryReadConfig` as fallback (non-fatal).  
+4. Commands requiring `CODEMAP.md` freshness (`plan`, `exec`, `ask`, `check`) verify map existence and staleness using `utils.hasGit` + `utils.getChangedFiles` (or timestamp comparison).  
+   - If stale or missing → exit 1 with explanatory message.  
 5. Command-specific pre‑processing (e.g., `exec` verifies `CODEPLAN.md` exists) then dispatches to the corresponding handler in `src/handlers.ts`.
 
 ### Command Flow
 
 | Command | Handler | Key Steps |
 |---------|---------|-----------|
-| `help` | `constants.printHelp` | Print built‑in help text via console.log. |
+| `help` | `constants.printHelp` | Print built‑in help text via `console.log`. |
 | `init` | `initMap` | Write template `CODEMAP.md` via `utils.buildTemplate`. |
 | `config` | `configure` | Interactive menu with `node:readline/promises`; read/write `~/.codetalker/config.json`. |
-| `scan` | `scanRepo` | 1. `utils.collectSourceFiles` + `indexer.buildSymbolIndex`<br>2. `buildInspectionPlan` (priority assignment)<br>3. `splitFilesForAgents` → distribute files among reviewer agents<br>4. `runReviewerAgents` – parallel LLM calls via `api.callChatCompletion`<br>5. `mergerPrompt` / aggregation<br>6. Output `ScanReport` to stdout (or stream if `--stream`). |
-| `map` | `writeMap` | 1. `runArchitectureScan` (uses indexer + tools)<br>2. `utils.buildMap` to generate markdown<br>3. Write `CODEMAP.md` via `writeSemanticMap`. |
-| `plan` | `planChange` | 1. `readMapForContext`<br>2. Build prompt via `prompts.planSystemPrompt` + user request<br>3. `api.runPrompt` or `api.streamChatCompletion`<br>4. Parse plan (markdown)<br>5. Write to `CODEPLAN.md` via `writePlan`. |
-| `exec` | `execution` | 1. Read `CODEPLAN.md`<br>2. Backup current source files to `~/.codetalker/backups/<timestamp>/`<br>3. `parseExecChangeSpecs` to extract change steps<br>4. For each spec, call LLM with `createExecEditorPrompt` (parallel via `runLimited` with `--parallel` limit)<br>5. Apply edits via `fs.writeFile`<br>6. `runSemanticSync` to update `CODEMAP.md`. |
-| `ask` | `askCodebase` | 1. Read map + optional scan context<br>2. `prompts.askSystemPrompt` + user question<br>3. `api.streamChatCompletion` (or non‑streaming)<br>4. Output answer to stdout. |
-| `check` | `checkMap` | 1. Ensure `CODEMAP.md` exists<br>2. `utils.hasGit`<br>3. `utils.getChangedFiles`; exit 0 if fresh, 1 if stale. |
+| `scan` | `scanRepo` | 1. `utils.collectSourceFiles` + `indexer.buildSymbolIndex` (now supports Assembly `.asm`/`.s`, C++, Python, TypeScript via AST dispatcher).<br>2. `buildInspectionPlan` assigns depth (`'full'` or `'shallow'`) and priorities.<br>3. `splitFilesForAgents` → distribute files among reviewer agents (respects `--parallel`).<br>4. `runReviewerAgents` – parallel LLM calls via `api.callChatCompletion`.<br>5. `mergerPrompt` / aggregation.<br>6. Output `ScanReport` to stdout (or stream if `--stream`). |
+| `map` | `writeMap` | 1. `runArchitectureScan` (uses indexer + tools).<br>2. `utils.buildMap` to generate markdown.<br>3. Write `CODEMAP.md` via `writeSemanticMap`. |
+| `plan` | `planChange` | 1. `readMapForContext`.<br>2. Build prompt via `prompts.planSystemPrompt` + user request.<br>3. `api.runPrompt` or `api.streamChatCompletion`.<br>4. Parse plan (markdown).<br>5. Write to `CODEPLAN.md` via `writePlan` (default `CODEPLAN.md`, overridable with `--out`). |
+| `exec` | `execution` | 1. Read `CODEPLAN.md` (default, overridable with `--plan`).<br>2. Backup current source files to `~/.codetalker/backups/<timestamp>/` (full copy).<br>3. `parseExecChangeSpecs` to extract change steps.<br>4. For each spec, call LLM with `createExecEditorPrompt` (parallel via `runLimited` with `--parallel` limit).<br>5. Apply edits via `fs.writeFile` (creates parent directories with `ensureParentDirectory`).<br>6. `runSemanticSync` to update `CODEMAP.md`. |
+| `ask` | `askCodebase` | 1. Read map + optional scan context.<br>2. `prompts.askSystemPrompt` + user question.<br>3. `api.streamChatCompletion` (or non‑streaming).<br>4. Output answer to stdout. |
+| `check` | `checkMap` | 1. Ensure `CODEMAP.md` exists.<br>2. `utils.hasGit`.<br>3. `utils.getChangedFiles`; exit 0 if fresh, 1 if stale. |
 | `rollback --list` | `listBackups` | List directories under `~/.codetalker/backups/` to stdout. |
 | `rollback <id>` | `rollbackTo` | Restore files from backup (see Rollback Flow). |
 
 ### Plan Flow (request → CODEPLAN.md)
 
-1. User runs `codetalk plan "Implement feature X"`.
-2. `planChange` reads `CODEMAP.md` via `readMapForContext` (truncated to fit context window).
-3. Constructs a prompt: system from `prompts.planSystemPrompt` + user request + map context.
-4. Sends to LLM via `api.runPrompt` (non‑streaming) or `api.streamChatCompletion` if `--stream`.
-5. LLM returns a markdown plan with file paths, actions, and descriptions.
-6. `writePlan` writes the plan to `CODEPLAN.md` (default `CODEPLAN.md`; overridable with `--out`).
-7. If streaming, progress dots / labels are printed to terminal.
+1. User runs `codetalk plan "Implement feature X"` (optionally `--stream`, `--out`).  
+2. `planChange` reads `CODEMAP.md` via `readMapForContext` (truncated to fit context window).  
+3. Constructs a prompt: system from `prompts.planSystemPrompt` + user request + map context.  
+4. Sends to LLM via `api.runPrompt` (non‑streaming) or `api.streamChatCompletion` if `--stream`.  
+5. LLM returns a markdown plan with file paths, actions, descriptions, and safety rating.  
+6. `writePlan` writes the plan to `CODEPLAN.md` (or `--out` path).  
+7. If streaming, progress dots/labels are printed to terminal.
 
 ### Exec Flow (plan → file edits)
 
-1. User runs `codetalk exec [--plan CODEPLAN.md] [--parallel N] [--stream]`.
-2. `execution` reads the plan file.
-3. **Backup**: copies all files mentioned in the plan to `~/.codetalker/backups/<timestamp>/` (full copy).
-4. **Parse**: `parseExecChangeSpecs` extracts change specifications (file path, action type, description) from the plan markdown. Throws on invalid syntax → exits 1 without changes.
-5. **Gatekeeper**: `gatekeeperPrompt` evaluates safety of the plan; if rejected, exits.
-6. **Editing**: For each change spec, calls LLM with `createExecEditorPrompt` to generate the new file content. Calls are made concurrently up to `--parallel` limit using `utils.runLimited`.
-7. **Apply**: Writes generated content to disk via `fs.writeFile` (calls `ensureParentDirectory` for new files).
-8. **Sync**: `runSemanticSync` calls LLM with `semanticSyncPrompt` to produce a diff‑aware update of `CODEMAP.md`, then overwrites the map via `writeSemanticMap`.
+1. User runs `codetalk exec [--plan CODEPLAN.md] [--parallel N] [--stream]`.  
+2. `execution` reads the plan file.  
+3. **Backup**: copies all files mentioned in the plan to `~/.codetalker/backups/<timestamp>/` (full copy).  
+4. **Parse**: `parseExecChangeSpecs` extracts change specifications (file path, action type, description) from the plan markdown. Throws on invalid syntax → exits 1 without changes.  
+5. **Gatekeeper**: `gatekeeperPrompt` evaluates safety of the plan; if rejected, exits 0 (no changes).  
+6. **Editing**: For each change spec, calls LLM with `createExecEditorPrompt` to generate new file content. Calls are made concurrently up to `--parallel` limit using `utils.runLimited`.  
+7. **Apply**: Writes generated content to disk via `fs.writeFile` (calls `ensureParentDirectory` for new files).  
+8. **Sync**: `runSemanticSync` calls LLM with `semanticSyncPrompt` to produce a diff‑aware update of `CODEMAP.md`, then overwrites the map via `writeSemanticMap`.  
 9. Outputs success summary (including token usage if enabled).
 
 ### Scan Flow (repo → CODEMAP.md)
 
-1. User runs `codetalk scan` or `codetalk map`.
-2. `utils.collectSourceFiles` walks repository tree (respects `.gitignore`? via git diff or fs), filters by known extensions (`.ts`, `.js`, `.py`, `.json`, `.md`, etc.), returns `SourceFile[]`.
-3. `indexer.buildSymbolIndex` extracts exports and top‑level symbols via AST (TypeScript `ts.ast`, Python `pydoc` or `child_process` spawn).
-4. `buildInspectionPlan` assigns priority per file (Low/Medium/High) based on role heuristics.
-5. `splitFilesForAgents` divides files among `--parallel` reviewer agents (equal or weighted distribution).
-6. For each agent group, LLM is called with appropriate `reviewerPromptLow|Medium|High|Full` via `runReviewerAgents` (parallel API calls).
-7. `mergerPrompt` combines agent outputs into a single `ScanReport`.
-8. For `scan` command: prints formatted report via `utils.formatScan` (or streams if `--stream`).
+1. User runs `codetalk scan` (optional flags: `--stream`, `--parallel <N>`, `--depth <full|shallow>`, `--timeout <ms>`).  
+2. `utils.collectSourceFiles` walks repository tree (respects `.gitignore` via git diff or fs), filters by known extensions (`.ts`, `.js`, `.py`, `.c`, `.cpp`, `.asm`, `.s`, `.json`, `.md`, etc.), returns `SourceFile[]`.  
+3. `indexer.buildSymbolIndex` extracts exports and top‑level symbols via AST dispatcher (`src/ast/index.ts` → `extractTs`, `extractPythonSymbols`, `extractCpp`, `extractAsm`).  
+4. `buildInspectionPlan` assigns priority per file (Low/Medium/High) based on role heuristics and `--depth` (shallow limits to entry points and high‑priority files).  
+5. `splitFilesForAgents` divides files among `--parallel` reviewer agents (equal or weighted distribution).  
+6. For each agent group, LLM is called with appropriate `reviewerPromptLow|Medium|High|Full` via `runReviewerAgents` (parallel API calls, respects `--timeout`).  
+7. `mergerPrompt` combines agent outputs into a single `ScanReport`.  
+8. For `scan` command: prints formatted report via `utils.formatScan` (or streams if `--stream`).  
 9. For `map` command: `writeMap` uses `utils.buildMap` to generate `CODEMAP.md` and writes it to disk.
 
 ### Error Flow
 
-- **Missing config**: Handler prints `"Please run 'codetalk config'"` and exits 1.
-- **Stale/missing `CODEMAP.md`**: `checkMap` (or pre‑condition in `plan`/`exec`/`ask`) prints error and exits 1.
-- **Missing `CODEPLAN.md`**: `exec` prints error and exits 1.
-- **LLM API failure**: `callChatCompletion` retries up to 3 times. On final failure, error is propagated to handler, which prints the error message and exits 1.
-- **File write failure**: Backup already taken; handler prints error and suggests `codetalk rollback <id>`. Exits 1.
-- **Invalid plan syntax**: `parseExecChangeSpecs` throws; `execution` catches, prints error, exits 1. No changes applied.
-- **Gatekeeper rejection**: `exec` prints rejection reason and exits 0 (no changes).
-- **Git not available**: `hasGit` returns false; `checkMap` and `getChangedFiles` report error or fall back to timestamp comparison. `rollback` may also fail if git is needed for path resolution.
-- **Missing required CLI arguments**: `utils.requireMessage` exits 1 with usage hint.
+- **Missing config**: Handler prints `"Please run 'codetalk config'"` and exits 1.  
+- **Stale/missing `CODEMAP.md`**: `checkMap` (or pre‑condition in `plan`/`exec`/`ask`) prints error and exits 1.  
+- **Missing `CODEPLAN.md`**: `exec` prints error and exits 1.  
+- **LLM API failure**: `callChatCompletion` retries up to 3 times. On final failure, error is propagated to handler, which prints the error message and exits 1.  
+- **File write failure**: Backup already taken; handler prints error and suggests `codetalk rollback <id>`. Exits 1.  
+- **Invalid plan syntax**: `parseExecChangeSpecs` throws; `execution` catches, prints error, exits 1. No changes applied.  
+- **Gatekeeper rejection**: `exec` prints rejection reason and exits 0 (no changes).  
+- **Git not available**: `hasGit` returns false; `checkMap` and `getChangedFiles` report error or fall back to timestamp comparison. `rollback` may also fail if git is needed for path resolution.  
+- **Missing required CLI arguments**: `utils.requireMessage` exits 1 with usage hint.  
 - **Unhandled exceptions**: Caught by top‑level `process.on('uncaughtException')` or yargs error handler; prints stack trace and exits 1.
 
 ### Rollback Flow
 
-1. User runs `codetalk rollback --list`:
-   - `listBackups` reads `~/.codetalker/backups/` directory.
-   - Lists each backup folder (timestamp‑named) with creation date and number of files.
-2. User runs `codetalk rollback <backup-id>`:
-   - `rollbackTo` reads all files from `~/.codetalker/backups/<backup-id>/`.
-   - For each backed‑up file, copies it back to its original location (overwrites current file without confirmation).
-3. After restoration, the `CODEMAP.md` is **not** automatically updated. User should run `codetalk map` or `codetalk check` afterwards.
+1. User runs `codetalk rollback --list`:  
+   - `listBackups` reads `~/.codetalker/backups/` directory.  
+   - Lists each backup folder (timestamp‑named) with creation date and number of files.  
+2. User runs `codetalk rollback <backup-id>`:  
+   - `rollbackTo` reads all files from `~/.codetalker/backups/<backup-id>/`.  
+   - For each backed‑up file, copies it back to its original location (overwrites current file without confirmation).  
+3. After restoration, the `CODEMAP.md` is **not** automatically updated. User should run `codetalk map` or `codetalk check` afterwards.  
 4. If the backup directory is missing or empty, prints error and exits 1.
 
 ## Data Flow
@@ -421,14 +423,16 @@ All functions are exported, return types and side effects noted where apparent. 
 
 | Source | Format | Producer | Consumer |
 |--------|--------|----------|----------|
-| CLI arguments and `stdin` | Plain text / yargs-parsed object | User | `src/index.ts` (yargs), `utils.parseOptions` |
-| `~/.codetalker/config.json` | JSON (see `CodetalkerConfig`) | `utils.writeConfig` via `configure` handler | All handlers via `utils.readConfig` or `utils.tryReadConfig` |
-| Repository source files | `.ts`, `.js`, `.json`, `.yaml`, `.md`, `.py`, etc. | Developer filesystem | `utils.collectSourceFiles`, `src/indexer.ts`, all tool functions (`toolRead`, `toolGlob`, `toolGrep`, etc.) |
+| CLI arguments and `stdin` | Plain text / yargs‑parsed object | User | `src/index.ts` (yargs), `utils.parseOptions` |
+| `~/.codetalker/config.json` | JSON (`CodetalkerConfig`) | `utils.writeConfig` via `configure` handler | All handlers via `utils.readConfig` or `utils.tryReadConfig` |
+| Repository source files | `.ts`, `.js`, `.json`, `.yaml`, `.md`, `.py`, `.asm`, `.s`, `.c`, `.cpp`, `.h`, `.hpp`, etc. | Developer filesystem | `utils.collectSourceFiles`, `src/indexer.ts`, all tool functions (`toolRead`, `toolGlob`, `toolGrep`, etc.) |
 | `CODEMAP.md` (repo root) | Markdown | `writeSemanticMap`, `runSemanticSync` | `planChange`, `askCodebase`, `checkMap`, `utils.readMapForContext` |
 | `CODEPLAN.md` (repo root) | Markdown | `planChange` via `utils.writePlan` | `execution` |
 | Backup directory: `~/.codetalker/backups/<timestamp>/` | File copies (original content) | `execution` (before edit) | `rollbackTo` |
 | LLM API responses | JSON (OpenAI‑compatible chat completion) | Remote API | `api.callChatCompletion`, `api.streamChatCompletion`, `api.callWithTools` |
-| Tool execution results (filesystem queries) | Strings, arrays, structured objects | Individual tool functions (`toolGlob`, `toolGrep`, etc.) | LLM via `api.callWithTools` (tool call results injected into subsequent request) |
+| Tool execution results (filesystem queries) | Strings, arrays, structured objects | Individual tool functions (`toolGlob`, `toolGrep`, etc.) | LLM via `api.callWithTools` (injected as tool call results) |
+
+**Note:** The repository also contains `agents/openai.yaml` (skill metadata), `SKILL.md`, `README.md` as documentation files, but they are not read by the runtime code under normal operation.
 
 #### Data Transformations
 
@@ -436,15 +440,15 @@ All functions are exported, return types and side effects noted where apparent. 
 |----------------|-----------|------------------------------|
 | CLI parsing | `process.argv` → `CliOptions` object | `src/index.ts` (yargs), `utils.parseOptions` |
 | File tree walk | Repository directory → `SourceFile[]` (path, language, size, lines, modified) | `utils.collectSourceFiles` (uses `fs.readdir`, `fs.stat`, git diff) |
-| Symbol extraction | Source files → `SymbolIndex` (`{ files: FileSymbols[], timestamp }`) | `src/indexer.ts` → `buildSymbolIndex` (delegates to `src/ast/ts.ts`, `src/ast/python.ts`, etc.) |
+| Symbol extraction | Source files → `SymbolIndex` (`{ files: FileSymbols[], timestamp }`) | `indexer.buildSymbolIndex` delegates to `ast/index.ts` which dispatches to language‑specific extractors: `ast/ts.ts` (`.ts`, `.tsx`, `.js`), `ast/python.ts` (`.py`), `ast/cpp.ts` (`.c`, `.cpp`, `.h`, `.hpp`), `ast/asm.ts` (`.asm`, `.s`) |
 | Repository scan | File list + LLM reviews → `ScanReport` | `handlers.scanRepo` → `buildInspectionPlan`, `runReviewerAgents` (multiple LLM calls), `mergerPrompt` |
 | Scan to map | `ScanReport` → `CODEMAP.md` (Markdown) | `utils.buildMap`, `handlers.writeSemanticMap` |
 | Question answering | `CODEMAP.md` + user question → terminal output | `handlers.askCodebase` → `prompts.askSystemPrompt` → `api.streamChatCompletion` or `callChatCompletion` |
 | Plan generation | `CODEMAP.md` + user request → `CODEPLAN.md` (Markdown) | `handlers.planChange` → `prompts.planSystemPrompt` → `api.runPrompt`/stream → `utils.writePlan` |
 | Plan execution | `CODEPLAN.md` → file edits on disk | `handlers.execution` → `parseExecChangeSpecs` → for each spec call LLM with `createExecEditorPrompt` → apply via `fs.writeFile` |
-| Post-exec map sync | Changed files + LLM sync prompt → updated `CODEMAP.md` | `handlers.runSemanticSync` → `prompts.semanticSyncPrompt` → `api.runPrompt` → `utils.replaceSection` |
+| Post‑exec map sync | Changed files + LLM sync prompt → updated `CODEMAP.md` | `handlers.runSemanticSync` → `prompts.semanticSyncPrompt` → `api.runPrompt` → `utils.replaceSection` |
 | Symbol index persistence | `SymbolIndex` in memory → `~/.codetalker/index.json` | `indexer.saveIndex` |
-| LLM tool‑use loop | User message + tool definitions → tool calls → tool results → final response | `api.callWithTools` (runs multiple rounds of `callChatCompletionMessages` + `parseToolCall` → `tools.executeTool`) |
+| LLM tool‑use loop | User message + tool definitions → tool calls → tool results → final response | `api.callWithTools` (multiple rounds of `callChatCompletionMessages` + `parseToolCall` → `tools.executeTool`) |
 | Interactive config | User terminal input → JSON config file | `handlers.configure` → `utils.writeConfig` (via `readline/promises`) |
 | Backup creation | Source files → backup directory copies | `handlers.execution` (copies files before edit) |
 | Rollback | Backup copies → original file locations | `handlers.rollbackTo` (copies back) |
@@ -457,7 +461,7 @@ All functions are exported, return types and side effects noted where apparent. 
 
 | Sink | Format | Written by | Notes |
 |------|--------|------------|-------|
-| `CODEMAP.md` (repo root) | Markdown | `handlers.writeSemanticMap`, `handlers.runSemanticSync` | Overwritten each `map` run; updated after `exec` |
+| `CODEMAP.md` (repo root) | Markdown | `writeSemanticMap`, `runSemanticSync` | Overwritten each `map` run; updated after `exec` |
 | `CODEPLAN.md` (repo root) | Markdown | `handlers.writePlan` | Overwritten each `plan` run |
 | `~/.codetalker/config.json` | JSON | `utils.writeConfig` | Persistent API configuration |
 | `~/.codetalker/index.json` | JSON | `indexer.saveIndex` | Optional symbol cache (written on `scan`/`map`) |
@@ -492,3 +496,46 @@ All functions are exported, return types and side effects noted where apparent. 
 | LLM response (streaming) | SSE‑like chunks | Each chunk is partial text or tool call delta; accumulated by `flushStreamEvents` |
 | Backup files | Original byte content | Copied verbatim; no compression or transformation |
 | Interactive panel | Terminal UI (via `MissionPanel`) | Used in `ask` streaming mode; format depends on terminal (ANSI escape sequences) |
+
+## 5. Execution Flows
+
+### Exec Flow (handlers.execution)
+
+1. Read CODEPLAN.md from disk. Fail if not found.
+2. Read current CODEMAP.md for context.
+3. **Coordinator (LLM)**: Analyze the plan, identify files to create/modify, produce FILE:/CHANGE: spec pairs.
+4. **Editor agents (parallel)**: For each spec, LLM generates file content or unified diff:
+   - New files: LLM returns complete file content.
+   - Existing files: LLM returns a unified diff (`--- a/+++ b/`).
+5. **Backup phase**: Each file is backed up to `.codetalk/backups/<timestamp>/` preserving directory structure.
+   - A `.backup-manifest` placeholder is written (no structured manifest.json).
+   - Nested paths (e.g. `src/a/b/file.ts`) are fully preserved in backup.
+6. **Validation**: Python syntax check via `ast.parse()` for `.py` files (existing files that use diff mode are skipped).
+7. **Apply phase**:
+   - Existing file + diff mode: `git apply --check -` → `git apply -`.
+   - On `--check` failure: `fail()` is called with the git error message. No file is written. No fallback.
+   - On apply failure: same `fail()` path. No file is overwritten.
+   - New file / full-file mode: `writeFileSync(target, newContent, "utf8")`.
+8. **Gatekeeper (LLM)**: Validate program logic. If issues found, retry editors with feedback (up to 2 retries).
+9. **Auto-sync**: Call `runSemanticSync` with git-changed files to update CODEMAP.md.
+10. Report results to stdout.
+
+Key details:
+- Diff mode is used when `hasGit()` returns true AND the file already exists.
+- `useDiff` is determined once per exec call, before editor agents run.
+- `stripCodeFence()` removes markdown ``` fences from all LLM output before use.
+
+### Rollback Flow (handlers.rollbackTo)
+
+1. Locate backup at `.codetalk/backups/<backupId>/`.
+2. **Manifest-driven path** (if `manifest.json` exists):
+   - Parse `manifest.json` for `files[]` array with `{ filePath, existed, backupPath }`.
+   - For each file where `existed === true`: copy `backupPath` back to `filePath` (restores nested paths).
+   - For each file where `existed === false`: delete `filePath` from the project (removes files created by exec).
+   - Report restored count and deleted count.
+3. **Legacy fallback** (no `manifest.json`):
+   - Recursively walk the backup directory.
+   - For each file (skipping `.backup-manifest` and `manifest.json`), compute relative path and copy back.
+   - Supports nested paths (unlike the original flat `readdirSync`).
+
+**Current limitation**: `manifest.json` is never written during exec backup. Only the legacy `.backup-manifest` placeholder is written. This means the manifest-driven rollback path (which handles new-file deletion and structured restore) is never activated. Rollback always falls through to the recursive legacy walker, which restores files but does not delete newly created files.
