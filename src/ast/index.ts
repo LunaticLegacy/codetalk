@@ -3,12 +3,12 @@ export { extractTsAst } from "./ts.js";
 export { extractCpp } from "./cpp.js";
 export { extractAsm } from "./asm.js";
 export type { AstResult } from "./types.js";
-
 import { extractPythonSymbols } from "./python.js";
 import { extractTsAst } from "./ts.js";
 import { extractCpp } from "./cpp.js";
 import { extractAsm } from "./asm.js";
 import type { AstResult } from "./types.js";
+
 
 /**
  * Extract symbols from a source file based on its extension.

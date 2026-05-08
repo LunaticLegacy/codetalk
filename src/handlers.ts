@@ -816,6 +816,13 @@ export async function execution(options: CliOptions): Promise<void> {
   } else {
     panel.done("sync", "No changes detected, map unchanged");
   }
+  // Write backup manifest (supports rollback — nested paths, new file deletion)
+  writeFileSync(join(backupDir, "manifest.json"), JSON.stringify({
+    createdAt: new Date().toISOString(),
+    repoRoot: options.cwd,
+    files: manifest
+  }, null, 2), "utf8");
+
   panel.finish();
 
   // Report to stdout
