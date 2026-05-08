@@ -158,9 +158,9 @@ async function testLlmMapWrite() {
     run("config", "set", "--api-url", apiUrl, "--api-key", "test-secret", "--model", "test-model");
     const { stdout, stderr } = await runAsyncDetailed("scan", "--llm", "--write", "--parallel", "2");
     assertIncludes(stdout, "Wrote LLM semantic map:", "scan --llm --write confirms map write");
-    assertIncludes(stderr, "[scan] Listing 3 source files for LLM inspection.", "scan --llm --write prints file listing progress");
-    assertIncludes(stderr, "[scan] Starting 2 reviewer agents with parallel limit 2.", "scan --llm --write starts parallel reviewers");
-    assertIncludes(stderr, "[codetalker] Calling model test-model", "scan --llm --write prints non-stream model progress");
+    assertIncludes(stderr, "[coordinator] Inspection plan ready", "scan --llm --write shows coordinator progress on stderr");
+    assertIncludes(stderr, "[reviewer ", "scan --llm --write shows reviewer progress on stderr");
+    assertIncludes(stderr, "[merger] Semantic map generated", "scan --llm --write shows merger progress on stderr");
     assertEqual(bodies.length, 4, "scan --llm --write calls coordinator, two reviewers, and merger");
     assertIncludes(bodies.join("\n"), "reviewer agent", "scan --llm --write sends reviewer prompts");
     assertIncludes(read(join(fixture, "CODEMAP.md")), "LLM Architecture", "scan --llm --write lands architecture");

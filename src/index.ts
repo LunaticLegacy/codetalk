@@ -65,6 +65,65 @@ type CodetalkerConfig = {
   model: string;
 };
 
+class MissionPanel {
+  #agents: Array<{ id: string; status: string; done: boolean; printed: boolean }> = [];
+  #isTTY: boolean;
+
+  constructor() {
+    this.#isTTY = process.stderr.isTTY === true;
+  }
+
+  add(id: string, status: string = ""): void {
+    this.#agents.push({ id, status, done: false, printed: false });
+    this.#render();
+  }
+
+  update(id: string, status: string): void {
+    const agent = this.#agents.find((a) => a.id === id);
+    if (agent) {
+      agent.status = status;
+      this.#render();
+    }
+  }
+
+  done(id: string, status: string): void {
+    const agent = this.#agents.find((a) => a.id === id);
+    if (agent) {
+      agent.status = status;
+      agent.done = true;
+      this.#render();
+    }
+  }
+
+  finish(): void {
+    if (this.#isTTY && this.#agents.length > 0) {
+      process.stderr.write(`\x1b[${this.#agents.length}B`);
+    }
+  }
+
+  #render(): void {
+    if (this.#isTTY) {
+      const count = this.#agents.length;
+      // Move cursor up to first panel line, then redraw all
+      if (count > 0) {
+        process.stderr.write(`\x1b[${count}A`);
+      }
+      for (const agent of this.#agents) {
+        const mark = agent.done ? "✓" : "·";
+        process.stderr.write(`\r\x1b[K${mark} ${agent.id}: ${agent.status}\n`);
+      }
+    } else {
+      // Non-TTY: only print newly-done agents to avoid spamming
+      for (const agent of this.#agents) {
+        if (agent.done && !agent.printed) {
+          agent.printed = true;
+          process.stderr.write(`[${agent.id}] ${agent.status}\n`);
+        }
+      }
+    }
+  }
+}
+
 const DEFAULT_MAP_PATH = "CODEMAP.md";
 const DEFAULT_PLAN_PATH = "CODEPLAN.md";
 const DEFAULT_MODEL = "gpt-4.1";
@@ -152,6 +211,12 @@ async function main(): Promise<void> {
 
   if (command === "map") {
     writeMap(options);
+    return;
+  }
+
+  // todo: implement this.
+  if (command === "exec") {
+    await execution(options);
     return;
   }
 
@@ -899,17 +964,24 @@ Agent checklist:
 }
 
 async function runArchitectureScan(options: CliOptions, report: ScanReport): Promise<string> {
-  taskProgress(options, "scan", `Listing ${report.files.length} source file${report.files.length === 1 ? "" : "s"} for LLM inspection.`);
+  const panel = new MissionPanel();
+
   const existingMap = existsSync(resolve(options.cwd, options.mapPath))
     ? readFileSync(resolve(options.cwd, options.mapPath), "utf8")
     : buildTemplate();
 
-  taskProgress(options, "scan", "Asking coordinator agent to plan file inspection.");
-  const inspectionPlan = await buildInspectionPlan(options, report, existingMap);
+  panel.add("coordinator", "Building inspection plan...");
+  const inspectionPlan = await buildInspectionPlan(options, report, existingMap, panel);
+  panel.done("coordinator", "Inspection plan ready");
+
   const chunks = splitFilesForAgents(report.files, options.parallel);
-  taskProgress(options, "scan", `Starting ${chunks.length} reviewer agent${chunks.length === 1 ? "" : "s"} with parallel limit ${options.parallel}.`);
-  const reviews = await runReviewerAgents(options, chunks, inspectionPlan);
-  taskProgress(options, "scan", "Merging reviewer outputs into final semantic map.");
+  for (let i = 0; i < chunks.length; i++) {
+    panel.add(`reviewer ${i + 1}`, "Queued...");
+  }
+
+  const reviews = await runReviewerAgents(options, chunks, inspectionPlan, panel);
+
+  panel.add("merger", "Merging review results...");
 
   const prompt = `You are Codetalker running an architecture scan.
 
@@ -939,10 +1011,13 @@ ${inspectionPlan}
 Reviewer outputs:
 ${reviews.map((review, index) => `\n## Reviewer ${index + 1}\n${review}`).join("\n")}`;
 
-  return sanitizeMarkdownMap(await runPromptCapture(options, prompt));
+  const result = sanitizeMarkdownMap(await callChatCompletion(options, prompt, panel, "merger"));
+  panel.done("merger", "Semantic map generated");
+  panel.finish();
+  return result;
 }
 
-async function buildInspectionPlan(options: CliOptions, report: ScanReport, existingMap: string): Promise<string> {
+async function buildInspectionPlan(options: CliOptions, report: ScanReport, existingMap: string, panel?: MissionPanel): Promise<string> {
   const prompt = `You are Codetalker coordinator agent.
 
 Goal:
@@ -964,12 +1039,15 @@ ${formatScan(report)}
 All source files:
 ${report.files.map((file) => `- ${file.path} (${file.language}, ${file.bytes} bytes)`).join("\n") || "- No source files detected."}`;
 
-  return callChatCompletion(options, prompt);
+  return callChatCompletion(options, prompt, panel, panel ? "coordinator" : undefined);
 }
 
-async function runReviewerAgents(options: CliOptions, chunks: SourceFile[][], inspectionPlan: string): Promise<string[]> {
+async function runReviewerAgents(options: CliOptions, chunks: SourceFile[][], inspectionPlan: string, panel?: MissionPanel): Promise<string[]> {
   const tasks = chunks.map((chunk, index) => async () => {
-    taskProgress(options, "scan", `Reviewer ${index + 1}/${chunks.length} inspecting ${chunk.length} file${chunk.length === 1 ? "" : "s"}.`);
+    const agentId = `reviewer ${index + 1}`;
+    if (panel) {
+      panel.update(agentId, `Inspecting ${chunk.length} file${chunk.length === 1 ? "" : "s"}...`);
+    }
     const prompt = `You are Codetalker reviewer agent ${index + 1}.
 
 Goal:
@@ -992,13 +1070,20 @@ ${chunk.map((file) => `- ${file.path} (${file.language}, ${file.bytes} bytes)`).
 File evidence:
 ${buildRepositoryEvidence(options, chunk, false)}`;
 
-    return callChatCompletion(options, prompt);
+    const result = await callChatCompletion(options, prompt, panel, agentId);
+    if (panel) {
+      panel.done(agentId, `${chunk.length} file${chunk.length === 1 ? "" : "s"} reviewed`);
+    }
+    return result;
   });
 
   return runLimited(tasks, options.parallel);
 }
 
 async function runSemanticSync(options: CliOptions, currentMap: string, changedFiles: string[]): Promise<string> {
+  const panel = new MissionPanel();
+  panel.add("sync", "Analyzing changed files...");
+
   const changedSourceFiles = changedFiles
     .map((file) => normalizePath(file))
     .filter((file) => existsSync(resolve(options.cwd, file)) && SOURCE_EXTENSIONS.has(getExtension(file)));
@@ -1033,7 +1118,10 @@ ${currentMap}
 Repository evidence:
 ${buildRepositoryEvidence(options, filesForEvidence)}`;
 
-  return sanitizeMarkdownMap(await runPromptCapture(options, prompt));
+  const result = sanitizeMarkdownMap(await runPromptCapture(options, prompt, panel, "sync"));
+  panel.done("sync", "Semantic sync complete");
+  panel.finish();
+  return result;
 }
 
 function writeSemanticMap(options: CliOptions, markdown: string): void {
@@ -1108,18 +1196,20 @@ async function runPrompt(options: CliOptions, prompt: string): Promise<void> {
   }
 }
 
-async function runPromptCapture(options: CliOptions, prompt: string): Promise<string> {
+async function runPromptCapture(options: CliOptions, prompt: string, panel?: MissionPanel, agentId?: string): Promise<string> {
   if (options.stream) {
     return streamChatCompletion(options, prompt);
   }
 
-  return callChatCompletion(options, prompt);
+  return callChatCompletion(options, prompt, panel, agentId);
 }
 
-async function callChatCompletion(options: CliOptions, prompt: string): Promise<string> {
+async function callChatCompletion(options: CliOptions, prompt: string, panel?: MissionPanel, agentId?: string): Promise<string> {
   const config = readConfig(options);
   const endpoint = `${trimTrailingSlash(config.apiUrl)}/chat/completions`;
-  const progress = startModelProgress(config.model, endpoint);
+  const progress = panel && agentId
+    ? makePanelProgress(panel, agentId)
+    : startModelProgress(config.model, endpoint);
 
   try {
     const response = await fetch(endpoint, {
@@ -1163,6 +1253,27 @@ async function callChatCompletion(options: CliOptions, prompt: string): Promise<
   } finally {
     progress(undefined);
   }
+}
+
+function makePanelProgress(panel: MissionPanel, agentId: string): (message: string | undefined) => void {
+  let active = true;
+  let tick = 0;
+
+  const timer = setInterval(() => {
+    if (!active) return;
+    tick += 1;
+    panel.update(agentId, `Waiting for response (${tick * 5}s elapsed)...`);
+  }, 5000);
+
+  return (message: string | undefined): void => {
+    if (message) {
+      panel.update(agentId, message);
+      return;
+    }
+
+    active = false;
+    clearInterval(timer);
+  };
 }
 
 async function streamChatCompletion(options: CliOptions, prompt: string): Promise<string> {
@@ -1315,6 +1426,10 @@ function writeConfig(config: CodetalkerConfig): void {
   const path = configPath();
   ensureParentDirectory(path);
   writeFileSync(path, JSON.stringify(config, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+}
+
+async function execution(_options: CliOptions): Promise<void> {
+  fail("exec command is not yet implemented.");
 }
 
 function configPath(): string {

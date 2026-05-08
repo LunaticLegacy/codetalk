@@ -87,6 +87,8 @@ All types are defined in `src/index.ts` (no explicit exports). Observed through 
 | `unique()` | Deduplicate array. | `arr: any[]` | `any[]` | None | – | – | – |
 | `normalizeParallel(n)` | Clamp integer parallel count. | `n: any` | `number` (≥1) | None | – | – | Returns 1 for non-numeric. |
 | `splitFilesForAgents()` | Split source files among reviewer agents (for `scan --llm`). | `files, parallel: number` | `string[][]` | None | – | – | – |
+| `MissionPanel` | Class managing per-agent progress lines during multi-agent LLM operations. | `constructor()` detects TTY; `add(id, status)` registers agent; `update(id, status)` updates line; `done(id, status)` marks complete; `finish()` cleans up cursor. | `void` | Writes to stderr with terminal escape codes (TTY) or simple lines (non-TTY). | – | – | – |
+| `makePanelProgress(panel, agentId)` | Creates a progress callback for `callChatCompletion` that updates the panel every 5s instead of writing separate lines. | `panel: MissionPanel`, `agentId: string` | `(message?) => void` | Sets interval timer; calls `panel.update` at 5s intervals. | – | Timer cleared on finalize. | – |
 | `runLimited()` | Execute async tasks with concurrency limit. | `tasks: (() => Promise)[]`, `limit: number` | `Promise<any[]>` | May fire multiple LLM requests concurrently. | – | – | – |
 | `buildMap()` | Construct full semantic map text from source code analysis (incomplete – only beginning visible). | `report: ScanReport, ...` | `string` | None | – | – | – |
 | `buildTemplate()` | Generate template map text. (Not visible – inferred to return static or reference-based content.) | None (or config) | `string` | None | – | – | – |
@@ -99,17 +101,20 @@ All types are defined in `src/index.ts` (no explicit exports). Observed through 
 | `fail(msg)` | Print error and exit. | `msg: string` | `never` (calls `process.exit(1)`) | Writes to stderr. | – | Process terminates. | – |
 | `getExtension(path)` | Return file extension. | `path: string` | `string` | None | – | – | – |
 | `normalizePath(p)` | Resolve relative to absolute. | `p: string` | `string` | None | – | – | – |
+| `callChatCompletion(options, prompt, panel?, agentId?)` | Send non‑streaming prompt to LLM API. When panel+agentId provided, uses `makePanelProgress` for in‑panel wait feedback. | `options: CliOptions`, `prompt: string`, `panel?: MissionPanel`, `agentId?: string` | `Promise<string>` | Makes HTTP POST to `{apiUrl}/chat/completions`. | API configured, network reachable. | Response parsed and returned. | Fails on HTTP error or missing `content`. |
+| `streamChatCompletion(options, prompt)` | Send streaming prompt to LLM API, write chunks to stdout in real time. | `options: CliOptions`, `prompt: string` | `Promise<string>` (full accumulated content) | Makes HTTP POST with `stream: true`; writes each SSE chunk's delta content to stdout immediately. | API configured, network reachable. | Full response returned, newline written to stdout. | Fails on HTTP error or missing stream body. |
+| `flushStreamEvents(buffer)` | Parse SSE buffer, extract `data:` lines, write delta content to stdout. | `buffer: string` | `{remainder: string, content: string}` | Writes delta content to stdout via `process.stdout.write`. | – | Buffer consumed. | – |
 | `getChangedFiles()` | Get list of changed files via `git diff --name-only` (or similar). | `cwd: string` | `string[]` | Spawns `git` process. | Git binary available. | – | Throws if git fails. |
 | `replaceSection(content, sectionName, newContent)` | Replace a section in a markdown file. | `content, sectionName, newContent: strings` | `string` | None | – | – | – |
 | `buildChangeSync(changedFiles)` | Build change sync markdown section. | `changedFiles: string[]` | `string` | None | – | – | – |
-| `runArchitectureScan(...)` | Run multi-agent LLM architecture scan (coordinator, reviewers, merger). | `report: ScanReport, options` | `Promise<{map: string}>` | Makes multiple LLM API calls (number depends on parallel). | API configured. | – | Network errors propagate. |
-| `writeSemanticMap(path, content)` | Write map to file. | `path, content: strings` | `void` | Overwrites file. | – | – | File write failure. |
-| `streamProgress(...)` | Handle streaming LLM response (write chunks to stdout). | `response, stream: boolean` | `Promise<void>` | Outputs to stdout. | – | – | – |
-| `runSemanticSync(...)` | Rebuild map sections using LLM. | `changedFiles, oldMap` | `Promise<{map: string}>` | Calls LLM API. | API configured. | – | – |
-| `buildAgentPrompt(type, ...)` | Construct prompts for coordinator/reviewer/merger roles. | `type: string, files: string[], ...` | `string` | None | – | – | – |
-| `runPrompt(options)` | Send request to LLM API (OpenAI-compatible). | `{apiUrl, apiKey, model, messages, stream}` | `Promise<{content: string}>` | Makes HTTP request (likely using Node's `https` or `fetch`). | – | – | Network failures or API errors. |
-| `requireMessage(options)` | Ensure a message operand is present. | `options: CliOptions` | `string` | Calls `fail` if missing. | – | – | Calls `fail`. |
-| `runPromptCapture(options)` | Run prompt and capture entire response (no streaming). | `options` | `Promise<string>` | Calls LLM API. | – | – | – |
+| `runArchitectureScan(options, report)` | Run multi-agent LLM architecture scan. Creates a MissionPanel, adds coordinator/reviewer/merger agents, displays per-agent progress via MissionPanel on stderr. | `options: CliOptions`, `report: ScanReport` | `Promise<string>` (semantic map) | Makes multiple LLM API calls (coordinator + N reviewers + merger). Writes per‑agent progress to stderr via `MissionPanel`. | API configured. | Report printed or map written. | Network errors propagate. |
+| `writeSemanticMap(options, markdown)` | Write semantic map to file. | `options: CliOptions`, `markdown: string` | `void` | Overwrites file. | – | – | File write failure. |
+| `streamProgress(options, message)` | Write a simple sync‑progress line to stdout when `--stream` is active (legacy; used only by `syncMap` for non‑LLM progress). | `options: CliOptions`, `message: string` | `void` | Outputs `[sync] message\n` to stdout when `options.stream` is true. | – | – | – |
+| `runSemanticSync(options, currentMap, changedFiles)` | Rebuild map sections using LLM with a MissionPanel progress line for the sync agent. | `options: CliOptions`, `currentMap: string`, `changedFiles: string[]` | `Promise<string>` | Calls LLM API via `runPromptCapture`; writes `[sync]` progress via MissionPanel on stderr. | API configured. | – | – |
+| `buildAgentPrompt(options, taskInstruction, userMessage)` | Construct context prompt for `ask`/`plan` commands (no multi‑agent). | `options: CliOptions`, `taskInstruction: string`, `userMessage: string` | `string` | None | – | – | – |
+| `runPrompt(options, prompt)` | Send prompt to LLM and print response. | `options: CliOptions`, `prompt: string` | `Promise<void>` | Makes HTTP request; outputs response to stdout. | – | – | Network failures or API errors. |
+| `requireMessage(options, errorMessage)` | Ensure a message operand is present. | `options: CliOptions`, `errorMessage: string` | `string` | Calls `fail` if missing. | – | – | Calls `fail`. |
+| `runPromptCapture(options, prompt, panel?, agentId?)` | Run prompt and capture entire response. Supports optional MissionPanel for progress updates during non‑streaming calls. | `options: CliOptions`, `prompt: string`, `panel?: MissionPanel`, `agentId?: string` | `Promise<string>` | Calls LLM API via `callChatCompletion` (non‑stream) or `streamChatCompletion` (stream). | – | – | – |
 | `writePlan(content, path)` | Write plan file. | `content, path: strings` | `void` | Writes file. | – | – | – |
 
 ## Runtime Flow
@@ -138,14 +143,29 @@ All types are defined in `src/index.ts` (no explicit exports). Observed through 
 
 ### Normal Execution (with LLM, e.g., `scan --llm --write`)
 1. Build scan report.
-2. Call `runArchitectureScan` which:
+2. Call `runArchitectureScan`:
+   - Creates a `MissionPanel` for per‑agent progress.
+   - Adds `coordinator` agent → `panel.add("coordinator", "Building inspection plan...")`.
+   - Sends coordinator prompt with full file list via `buildInspectionPlan`.
+   - On coordinator response: `panel.done("coordinator", "Inspection plan ready")`.
    - Splits source files among `parallel` reviewers (default 2).
-   - Sends coordinator prompt with full file list.
-   - Sends each reviewer their assigned files.
-   - Merges reviewer outputs.
+   - Adds one panel agent per reviewer: `panel.add("reviewer N", "Queued...")`.
+   - Runs reviewers in parallel via `runReviewerAgents`, each updating its panel line: `panel.update("reviewer N", "Inspecting M files...")` and finalizing on completion.
+   - Adds `merger` agent: `panel.add("merger", "Merging review results...")`.
+   - Sends merger prompt; panel updates via `makePanelProgress` every 5s while waiting for the LLM.
+   - On merger response: `panel.done("merger", "Semantic map generated")`.
+   - Calls `panel.finish()` to restore cursor position.
+   - Output: per‑agent progress on stderr (TTY: in‑place with `\x1b[A`/`\x1b[K`; non‑TTY: one line per completed agent).
    - Returns final map text.
    - Writes to CODEMAP.md if `--write` is specified.
-3. `ask`/`plan` sends user message + context to LLM and outputs response.
+3. `ask`/`plan` sends user message + context to LLM and outputs response (single‑agent, no MissionPanel).
+
+### Normal Execution (with LLM, e.g., `sync --llm`)
+1. `syncMap` reads git changes, updates Change Sync section.
+2. If `--llm`, calls `runSemanticSync`:
+   - Creates a `MissionPanel` with one agent: `panel.add("sync", "Analyzing changed files...")`.
+   - Calls `runPromptCapture` with the panel (non‑streaming) or `streamChatCompletion` (streaming).
+   - On response: `panel.done("sync", "Semantic sync complete")`.
 
 ### Error Paths
 - **Missing API credentials**: `runPrompt` likely throws or calls `fail()`; no graceful fallback.
@@ -188,6 +208,13 @@ All types are defined in `src/index.ts` (no explicit exports). Observed through 
 - Terminal state changed by `readline` prompts during `config` interactive mode.
 - Exit code set to 1 on error.
 
+### Terminal State Changes (MissionPanel)
+- **TTY mode**: `MissionPanel` writes `\x1b[N A` (cursor up) and `\x1b[K` (clear line) to stderr for in‑place per‑agent progress. Cursor is reset via `\x1b[N B` on `finish()`.
+- **Non‑TTY mode**: `MissionPanel` falls back to simple `[agentId] status\n` lines on stderr, emitted only when an agent is marked `done`.
+- **No TTY detection**: uses `process.stderr.isTTY === true`.
+- **`makePanelProgress` interval**: updates an agent's panel line every 5s with elapsed time (e.g., "Waiting for response (10s elapsed)..."), replacing the old `startModelProgress` which wrote separate lines to stderr.
+- **Cleanup**: `panel.finish()` moves cursor past the panel; timer cleared via `clearInterval` in the progress callback.
+
 ### Caches or Temporary Artifacts
 - None observed. Temp directories in test are cleaned up via `finally` block.
 
@@ -204,6 +231,29 @@ No changes synchronized yet.
 
 ### Notes on Incomplete Inspection
 
-- **`src/index.ts`** was **truncated** during review; approximately 30KB of 45KB was analyzed. Functions whose full implementation is uncertain: `buildTemplate`, `configPath`, `readConfig`, `tryReadConfig`, `writeConfig`, `trimTrailingSlash`, `maskSecret`, `fail`, `getExtension`, `normalizePath`, `getChangedFiles`, `replaceSection`, `buildChangeSync`, `runArchitectureScan`, `writeSemanticMap`, `streamProgress`, `runSemanticSync`, `buildAgentPrompt`, `runPrompt`, `requireMessage`, `runPromptCapture`, `writePlan`, `buildMap`. Their signatures and behavior were inferred from context and sketchy evidence.
+- **`src/index.ts`** was inspected in full; no truncation issues. All functions listed above have been observed directly.
 - **References** (`references/repo-semantic-map.md`, `references/semantic-map-template.md`, `SKILL.md`, `README.md`, `README_EN.md`, `agents/openai.yaml`, `.github/workflows/ci.yml`) were not directly inspected; their content is inferred from file paths and scan report mentions.
 - **All** sections above marked as "inferred" or "uncertain" should be verified by reading the complete source files before relying on them for code changes.
+
+### Test Output Format Changes
+
+With the MissionPanel, multi-agent operations (`scan --llm`, `sync --llm`) no longer emit `[scan]`/`[codetalker]` progress lines to stderr. Instead:
+
+**Non-TTY (CI/child process):**
+```
+[coordinator] Inspection plan ready
+[reviewer 1] 2 files reviewed
+[reviewer 2] 1 files reviewed
+[merger] Semantic map generated
+```
+
+**TTY (real terminal):**
+```
+✓ coordinator: Inspection plan ready
+· reviewer 1: Inspecting 2 files...
+· reviewer 2: Inspecting 1 files...
+· merger: Merging review results...
+```
+(with in-place updates via carriage-return and escape codes)
+
+Tests (`testLlmMapWrite`) updated to assert new panel-style stderr output instead of old `[scan]`/`[codetalker]` lines.
