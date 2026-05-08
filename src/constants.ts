@@ -89,7 +89,11 @@ export const SOURCE_EXTENSIONS = new Map<string, string>([
   [".cc", "C++"],
   [".cxx", "C++"],
   [".hh", "C/C++ Header"],
-  [".swift", "Swift"]
+  [".swift", "Swift"],
+  [".asm", "Assembly"],
+  [".s", "Assembly"],
+  [".S", "Assembly"],
+  [".inc", "Assembly"]
 ]);
 
 export const IGNORED_DIRS = new Set([
