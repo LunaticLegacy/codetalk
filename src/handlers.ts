@@ -258,14 +258,14 @@ export async function execution(options: CliOptions): Promise<void> {
 
   // Phase 1: Coordinator extracts affected files and change specs
   const coordinatorPrompt = createExecCoordPrompt(plan, currentMap, options);
-  const { content: coordinatorResult } = await callChatCompletion(options, coordinatorPrompt, panel, "coordinator", "Analyzing plan");
+  const { content: coordinatorResult, tokenStr: execCoordTokens } = await callChatCompletion(options, coordinatorPrompt, panel, "coordinator", "Analyzing plan");
 
   const fileSpecs = parseExecChangeSpecs(coordinatorResult);
   if (fileSpecs.length === 0) {
     fail("Coordinator could not identify any files to change from the plan.");
   }
 
-  panel.done("coordinator", `Identified ${fileSpecs.length} file${fileSpecs.length === 1 ? "" : "s"} to edit`);
+  panel.done("coordinator", `Identified ${fileSpecs.length} file${fileSpecs.length === 1 ? "" : "s"} to edit${execCoordTokens}`);
 
   // Phase 2: For each file, generate new content in parallel
   for (let i = 0; i < fileSpecs.length; i++) {
@@ -284,7 +284,7 @@ export async function execution(options: CliOptions): Promise<void> {
     panel.update(agentId, `Asking LLM for file ${fileNum}: ${spec.filePath}...`);
     const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan, currentMap);
     const editDetail = `File ${fileNum}: ${spec.filePath}`;
-    const { content: rawContent } = await callChatCompletion(options, editorPrompt, panel, agentId, editDetail);
+    const { content: rawContent, tokenStr: editorTokens } = await callChatCompletion(options, editorPrompt, panel, agentId, editDetail);
     const newContent = stripCodeFence(rawContent);
 
     return {
@@ -331,8 +331,8 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
     : buildTemplate();
 
   panel.add("coordinator", "Building file inspection plan (coordinator)...");
-  const inspectionPlan = await buildInspectionPlan(options, report, existingMap, panel);
-  panel.done("coordinator", "Inspection plan ready");
+  const { content: inspectionPlan, tokenStr: coordTokens } = await buildInspectionPlan(options, report, existingMap, panel);
+  panel.done("coordinator", `Inspection plan ready${coordTokens}`);
 
   const chunks = splitFilesForAgents(report.files, options.parallel);
   for (let i = 0; i < chunks.length; i++) {
@@ -399,7 +399,7 @@ ${perFileAnalyses}`;
   return result;
 }
 
-export async function buildInspectionPlan(options: CliOptions, report: ScanReport, existingMap: string, panel?: MissionPanel): Promise<string> {
+export async function buildInspectionPlan(options: CliOptions, report: ScanReport, existingMap: string, panel?: MissionPanel): Promise<{ content: string; tokenStr: string }> {
   const prompt = `You are Codetalker coordinator agent.
 
 Goal:
@@ -421,8 +421,8 @@ ${formatScan(report)}
 All source files:
 ${report.files.map((file) => `- ${file.path} (${file.language}, ${file.bytes} bytes)`).join("\n") || "- No source files detected."}`;
 
-  const { content: planContent } = await callChatCompletion(options, prompt, panel, panel ? "coordinator" : undefined, panel ? "Planning inspection" : undefined);
-  return planContent;
+  const { content: planContent, tokenStr: planTokens } = await callChatCompletion(options, prompt, panel, panel ? "coordinator" : undefined, panel ? "Planning inspection" : undefined);
+  return { content: planContent, tokenStr: planTokens };
 }
 
 export async function runReviewerAgents(options: CliOptions, chunks: SourceFile[][], inspectionPlan: string, panel?: MissionPanel): Promise<{ tmpDir: string; analysisFiles: string[] }> {
@@ -432,6 +432,7 @@ export async function runReviewerAgents(options: CliOptions, chunks: SourceFile[
   const tasks = chunks.map((chunk, index) => async () => {
     const agentId = `reviewer ${index + 1}`;
     const fileAnalysisPaths: string[] = [];
+    let lastTokenStr = "";
 
     for (let fi = 0; fi < chunk.length; fi++) {
       const file = chunk[fi];
@@ -462,7 +463,8 @@ File: ${file.path} (${file.language}, ${file.bytes} bytes)
 
 \`\`\`\n${content}\n\`\`\``;
 
-      const { content: analysis } = await callChatCompletion(options, prompt, panel, agentId, `File ${fileNum}: ${file.path}`);
+      const { content: analysis, tokenStr } = await callChatCompletion(options, prompt, panel, agentId, `File ${fileNum}: ${file.path}`);
+      lastTokenStr = tokenStr;
 
       const tmpPath = join(tmpDir, `reviewer-${index + 1}-file-${fi}-${sanitizePath(file.path)}.md`);
       writeFileSync(tmpPath, analysis, "utf8");
@@ -472,7 +474,7 @@ File: ${file.path} (${file.language}, ${file.bytes} bytes)
       panel?.update(agentId, `\u2713 ${file.path}`);
     }
 
-    panel?.done(agentId, `${chunk.length} file${chunk.length === 1 ? "" : "s"} analyzed`);
+    panel?.done(agentId, `${chunk.length} file${chunk.length === 1 ? "" : "s"} analyzed${lastTokenStr}`);
   });
 
   await runLimited(tasks, options.parallel);
