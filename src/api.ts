@@ -4,11 +4,11 @@ import { trimTrailingSlash, fail, readConfig } from "./utils.js";
 
 // ── Chat completion (non-streaming) ──────────────────────────────────────────
 
-export async function callChatCompletion(options: CliOptions, prompt: string, panel?: MissionPanel, agentId?: string): Promise<string> {
+export async function callChatCompletion(options: CliOptions, prompt: string, panel?: MissionPanel, agentId?: string, detail?: string): Promise<string> {
   const config = readConfig(options);
   const endpoint = `${trimTrailingSlash(config.apiUrl)}/chat/completions`;
   const progress = panel && agentId
-    ? makePanelProgress(panel, agentId, `Calling ${config.model}`)
+    ? makePanelProgress(panel, agentId, `Calling ${config.model}`, detail)
     : startModelProgress(config.model, endpoint);
 
   try {
@@ -188,27 +188,38 @@ export function showTokenUsage(usage: TokenUsage | undefined): void {
 
 // ── Progress tracking ────────────────────────────────────────────────────────
 
-export function makePanelProgress(panel: MissionPanel, agentId: string, taskLabel: string = "Processing"): (message: string | undefined) => void {
+export function makePanelProgress(panel: MissionPanel, agentId: string, taskLabel: string = "Processing", detail?: string): (message: string | undefined) => void {
   let active = true;
   let tick = 0;
+  let currentDetail = detail;
 
-  panel.update(agentId, `${taskLabel} (sending request...)`);
+  const show = (): void => {
+    const detailStr = currentDetail ? ` for ${currentDetail}` : "";
+    panel.update(agentId, `${taskLabel}${detailStr} (sending request...)`);
+  };
+  show();
 
   const timer = setInterval(() => {
     if (!active) return;
     tick += 1;
-    panel.update(agentId, `${taskLabel} (${tick * 5}s elapsed...)`);
-  }, 5000);
+    const secs = (tick / 10).toFixed(1);
+    const detailStr = currentDetail ? ` for ${currentDetail}` : "";
+    panel.update(agentId, `${taskLabel}${detailStr} (${secs}s elapsed...)`);
+  }, 100);
 
-  return (message: string | undefined): void => {
+  const cb = (message: string | undefined): void => {
     if (message) {
       panel.update(agentId, message);
       return;
     }
-
     active = false;
     clearInterval(timer);
   };
+
+  // Allow updating the detail string live (e.g. which file is being processed)
+  (cb as any).setDetail = (d: string): void => { currentDetail = d; };
+
+  return cb;
 }
 
 export function startModelProgress(model: string, endpoint: string): (message: string | undefined) => void {
@@ -249,10 +260,10 @@ export async function runPrompt(options: CliOptions, prompt: string): Promise<vo
   }
 }
 
-export async function runPromptCapture(options: CliOptions, prompt: string, panel?: MissionPanel, agentId?: string): Promise<string> {
+export async function runPromptCapture(options: CliOptions, prompt: string, panel?: MissionPanel, agentId?: string, detail?: string): Promise<string> {
   if (options.stream) {
     return streamChatCompletion(options, prompt);
   }
 
-  return callChatCompletion(options, prompt, panel, agentId);
+  return callChatCompletion(options, prompt, panel, agentId, detail);
 }

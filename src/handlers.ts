@@ -173,7 +173,7 @@ Requirements:
     await runPrompt(options, prompt);
     panel.done("ask", "Response streamed");
   } else {
-    const answer = await callChatCompletion(options, prompt, panel, "ask");
+    const answer = await callChatCompletion(options, prompt, panel, "ask", "Answering question");
     panel.done("ask", `Complete (${answer.length} chars)`);
     panel.finish();
     console.log(answer);
@@ -211,7 +211,7 @@ Requirements:
   const panel = new MissionPanel();
   panel.add("plan", "Generating implementation plan...");
 
-  const plan = await runPromptCapture(options, prompt, panel, "plan");
+  const plan = await runPromptCapture(options, prompt, panel, "plan", "Generating plan");
 
   writePlan(options, plan);
   panel.done("plan", `Plan written to ${options.outPath}`);
@@ -258,7 +258,7 @@ export async function execution(options: CliOptions): Promise<void> {
 
   // Phase 1: Coordinator extracts affected files and change specs
   const coordinatorPrompt = createExecCoordPrompt(plan, currentMap, options);
-  const coordinatorResult = await callChatCompletion(options, coordinatorPrompt, panel, "coordinator");
+  const coordinatorResult = await callChatCompletion(options, coordinatorPrompt, panel, "coordinator", "Analyzing plan");
 
   const fileSpecs = parseExecChangeSpecs(coordinatorResult);
   if (fileSpecs.length === 0) {
@@ -281,7 +281,8 @@ export async function execution(options: CliOptions): Promise<void> {
 
     panel.update(agentId, `Asking LLM to generate new code for ${spec.filePath}...`);
     const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan, currentMap);
-    let newContent = await callChatCompletion(options, editorPrompt, panel, agentId);
+    const editDetail = existsSync(filePath) ? `Writing ${spec.filePath}` : `Creating ${spec.filePath}`;
+    let newContent = await callChatCompletion(options, editorPrompt, panel, agentId, editDetail);
     newContent = stripCodeFence(newContent);
 
     return {
@@ -384,7 +385,7 @@ ${inspectionPlan}
 Per-file analyses:
 ${perFileAnalyses}`;
 
-  const result = sanitizeMarkdownMap(await callChatCompletion(options, prompt, panel, "merger"));
+  const result = sanitizeMarkdownMap(await callChatCompletion(options, prompt, panel, "merger", "Synthesizing map"));
   panel.done("merger", "Semantic map generated");
   panel.finish();
 
@@ -416,7 +417,7 @@ ${formatScan(report)}
 All source files:
 ${report.files.map((file) => `- ${file.path} (${file.language}, ${file.bytes} bytes)`).join("\n") || "- No source files detected."}`;
 
-  return callChatCompletion(options, prompt, panel, panel ? "coordinator" : undefined);
+  return callChatCompletion(options, prompt, panel, panel ? "coordinator" : undefined, panel ? "Planning inspection" : undefined);
 }
 
 export async function runReviewerAgents(options: CliOptions, chunks: SourceFile[][], inspectionPlan: string, panel?: MissionPanel): Promise<{ tmpDir: string; analysisFiles: string[] }> {
@@ -455,7 +456,7 @@ File: ${file.path} (${file.language}, ${file.bytes} bytes)
 
 \`\`\`\n${content}\n\`\`\``;
 
-      const analysis = await callChatCompletion(options, prompt, panel, agentId);
+      const analysis = await callChatCompletion(options, prompt, panel, agentId, `Reading ${file.path}`);
 
       const tmpPath = join(tmpDir, `reviewer-${index + 1}-file-${fi}-${sanitizePath(file.path)}.md`);
       writeFileSync(tmpPath, analysis, "utf8");
@@ -519,7 +520,7 @@ ${currentMap}
 Repository evidence:
 ${buildRepositoryEvidence(options, filesForEvidence)}`;
 
-  const result = sanitizeMarkdownMap(await runPromptCapture(options, prompt, panel, "sync"));
+  const result = sanitizeMarkdownMap(await runPromptCapture(options, prompt, panel, "sync", "Syncing semantics"));
   panel.done("sync", "Semantic sync complete");
   panel.finish();
   return result;
