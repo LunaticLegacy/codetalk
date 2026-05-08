@@ -23,7 +23,7 @@ export function collectSourceFiles(root: string): SourceFile[] {
       const fullPath = join(directory, entry.name);
 
       if (entry.isDirectory()) {
-        if (!IGNORED_DIRS.has(entry.name)) {
+        if (!IGNORED_DIRS.has(entry.name) && !isGitignored(gitignorePatterns, root, fullPath)) {
           visit(fullPath);
         }
         continue;
@@ -77,9 +77,10 @@ function loadGitignore(root: string): string[] {
     .filter((line) => line && !line.startsWith("#"));
 }
 
-/** Check if a file path matches any .gitignore pattern using git. */
+/** Check if a file path matches any .gitignore pattern. */
 function isGitignored(patterns: string[], root: string, abspath: string): boolean {
   if (patterns.length === 0) return false;
+
   // Use git check-ignore for accurate matching (handles all pattern types)
   try {
     execFileSync("git", ["check-ignore", "-q", abspath], {
@@ -88,8 +89,32 @@ function isGitignored(patterns: string[], root: string, abspath: string): boolea
     });
     return true;
   } catch {
-    return false;
+    // Git not available or path not gitignored — fall back to simple matching
   }
+
+  // Fallback: simple .gitignore pattern matching
+  const relPath = normalizePath(relative(root, abspath));
+  for (const pattern of patterns) {
+    const trimmed = pattern.replace(/\\$/, "").trim();
+    if (!trimmed) continue;
+
+    const negate = trimmed.startsWith("!");
+    const pat = negate ? trimmed.slice(1).trim() : trimmed;
+
+    // Directory-only pattern (ends with /)
+    const dirOnly = pat.endsWith("/");
+    const basePat = dirOnly ? pat.slice(0, -1) : pat;
+
+    // Check if path starts with or equals the pattern, or is under it
+    const isMatch = relPath === basePat
+      || relPath.startsWith(basePat + "/")
+      || relPath.startsWith(pat + "/")
+      || relPath === pat;
+
+    if (isMatch) return !negate;
+  }
+
+  return false;
 }
 
 // ── Summaries ─────────────────────────────────────────────────────────────────
