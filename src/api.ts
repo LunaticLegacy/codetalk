@@ -332,29 +332,47 @@ const DEFAULT_MAX_TOOL_TURNS = 15;
  * The LLM outputs JSON like `{"_tool": "toolName", "args": {...}}` on its own line.
  */
 export function parseToolCall(content: string): { toolName: string; args: Record<string, any> } | null {
-  // Find JSON containing "_tool" anywhere in content (LLM may wrap in HTML/XML tags)
-  const marker = '{"_tool"';
-  const startIdx = content.indexOf(marker);
-  if (startIdx < 0) return null;
-
-  const jsonPart = content.slice(startIdx);
-  let depth = 0;
-  let endIdx = -1;
-  for (let i = 0; i < jsonPart.length; i++) {
-    if (jsonPart[i] === "{") depth++;
-    if (jsonPart[i] === "}") {
-      depth--;
-      if (depth === 0) { endIdx = i + 1; break; }
+  // Format 1: JSON {"_tool": "name", "args": {...}} anywhere in content
+  const jsonMarker = '{"_tool"';
+  const jsonIdx = content.indexOf(jsonMarker);
+  if (jsonIdx >= 0) {
+    const jsonPart = content.slice(jsonIdx);
+    let depth = 0, endIdx = -1;
+    for (let i = 0; i < jsonPart.length; i++) {
+      if (jsonPart[i] === "{") depth++;
+      if (jsonPart[i] === "}") {
+        depth--;
+        if (depth === 0) { endIdx = i + 1; break; }
+      }
+    }
+    if (endIdx > 0) {
+      try {
+        const parsed = JSON.parse(jsonPart.slice(0, endIdx));
+        if (parsed._tool && typeof parsed._tool === "string") {
+          return { toolName: parsed._tool, args: parsed.args ?? {} };
+        }
+      } catch {}
     }
   }
-  if (endIdx < 0) return null;
 
-  try {
-    const parsed = JSON.parse(jsonPart.slice(0, endIdx));
-    if (parsed._tool && typeof parsed._tool === "string") {
-      return { toolName: parsed._tool, args: parsed.args ?? {} };
+  // Format 2: XML <functioncall><invoke name="..."><parameter name="k" ...>v</parameter></invoke></functioncall>
+  const invokeMatch = content.match(/<invoke\s+name="([^"]+)">([\s\S]*?)<\/invoke>/i);
+  if (invokeMatch) {
+    const toolName = invokeMatch[1];
+    const paramsBlock = invokeMatch[2];
+    const args: Record<string, any> = {};
+    const paramRe = /<parameter\s+name="([^"]+)"[^>]*>([^<]*)<\/parameter>/g;
+    let pm;
+    while ((pm = paramRe.exec(paramsBlock)) !== null) {
+      const val: string = pm[2].trim();
+      // Try to parse as number or boolean
+      if (val === "true") args[pm[1]] = true;
+      else if (val === "false") args[pm[1]] = false;
+      else if (/^\d+(\.\d+)?$/.test(val)) args[pm[1]] = Number(val);
+      else args[pm[1]] = val;
     }
-  } catch {}
+    return { toolName, args };
+  }
 
   return null;
 }
@@ -374,8 +392,9 @@ function formatToolArgs(args: Record<string, any>): string {
 export function buildToolDefinitions(tools: ToolDef[]): string {
   const lines: string[] = [];
   lines.push("<tools>");
-  lines.push("Available tools. When you need to explore the codebase, output ONLY a JSON tool call:");
-  lines.push('{"_tool": "name", "args": {...}}');
+  lines.push("Available tools. When you need to explore the codebase, call a tool using either format:");
+  lines.push('Format 1: {"_tool": "name", "args": {...}}');
+  lines.push('Format 2: <functioncall><invoke name="name"><parameter name="k" string="true">v</parameter></invoke></functioncall>');
   lines.push("");
 
   for (const tool of tools) {
@@ -413,27 +432,18 @@ export async function callWithTools(
     { role: "user", content: userMessage }
   ];
 
-  const prog = panel && agentId
-    ? makePanelProgress(panel, agentId, `Calling ${readConfig(options).model}`, "with tools")
-    : startModelProgress(readConfig(options).model, "tool-calling");
-  const progress = prog as any;
-
   for (let turn = 0; turn < maxTurns; turn++) {
-    progress(`Thinking (turn ${turn + 1}/${maxTurns})...`);
+    panel?.update(agentId || "", `Thinking (turn ${turn + 1}/${maxTurns})...`);
 
     const { content } = await callChatCompletionMessages(options, messages, panel, agentId, `Thinking (turn ${turn + 1}/${maxTurns})`);
 
     const toolCall = parseToolCall(content);
     if (!toolCall) {
-      progress(undefined);
       return content;
     }
 
-    // Show tool info via setDetail so the 100ms timer keeps showing it
     const argsSummary = formatToolArgs(toolCall.args);
-    if (progress.setDetail) {
-      progress.setDetail(`Tool: ${toolCall.toolName} ${argsSummary}`);
-    }
+    panel?.update(agentId || "", `Tool: ${toolCall.toolName} ${argsSummary}`);
 
     const result = executeTool(toolCall.toolName, toolCall.args, options.cwd);
     const resultXml = result.success
@@ -443,8 +453,6 @@ export async function callWithTools(
     messages.push({ role: "assistant", content });
     messages.push({ role: "user", content: resultXml });
   }
-
-  progress(undefined);
 
   // Max turns reached — do one final call without tool preamble to get a plain answer
   const finalSystem = `${systemPrompt}\n\nYou have reached the maximum number of tool calls. Please provide your best answer based on what you've learned so far.`;
