@@ -1,6 +1,6 @@
 {
   "name": "codetalk-cli",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Maintain a living semantic map that agents use to understand and safely modify code.",
   "type": "module",
   "bin": {
