@@ -1,5 +1,13 @@
+function formatElapsed(ms: number): string {
+  const secs = ms / 1000;
+  if (secs < 60) return `${secs.toFixed(1)}s`;
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m}m${s}s`;
+}
+
 export class MissionPanel {
-  #agents: Array<{ id: string; status: string; done: boolean; printed: boolean }> = [];
+  #agents: Array<{ id: string; status: string; done: boolean; printed: boolean; startedAt: number }> = [];
   #isTTY: boolean;
   #started: boolean = false;
 
@@ -8,7 +16,7 @@ export class MissionPanel {
   }
 
   add(id: string, status: string = ""): void {
-    this.#agents.push({ id, status, done: false, printed: false });
+    this.#agents.push({ id, status, done: false, printed: false, startedAt: Date.now() });
     this.#render();
   }
 
@@ -23,7 +31,15 @@ export class MissionPanel {
   done(id: string, status: string): void {
     const agent = this.#agents.find((a) => a.id === id);
     if (agent) {
-      agent.status = status;
+      const elapsed = Date.now() - agent.startedAt;
+      const elapsedStr = formatElapsed(elapsed);
+      // Prepend runtime before any [tokens...] suffix
+      if (status.includes(" [tokens:")) {
+        const idx = status.indexOf(" [tokens:");
+        agent.status = status.slice(0, idx) + ` (${elapsedStr})` + status.slice(idx);
+      } else {
+        agent.status = status + ` (${elapsedStr})`;
+      }
       agent.done = true;
       this.#render();
     }
