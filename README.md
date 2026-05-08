@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="codetalk" width="80" />
+  <img src="assets/logo.svg" alt="codetalk" width="80" />
 </p>
 
 <h2 align="center">codetalk</h2>
@@ -35,13 +35,14 @@ This is not a documentation generator. The document is not the endpoint; it is t
 
 ### Why codetalk over raw LLM prompts?
 
-| | codetalk-cli | Raw LLM Prompts |
+| | codetalk | Raw LLM Prompts |
 |---|---|---|
 | **Context persistence** | Persistent `CODEMAP.md` across sessions | Lost after every chat |
-| **Parallel review** | Multi-agent coordinator + reviewers + merger | Single-shot generation |
-| **Planned execution** | Plan → review → execute cycle | No structured workflow |
-| **Change tracking** | Automated sync via `git` diff | Manual re-upload |
+| **Symbol index** | AST-based per-file indexing (Python, TS, C++, Assembly) | No code understanding |
+| **Planned execution** | Plan → execute with backup, diff, validation gates | No structured workflow |
+| **Change tracking** | Automated git-aware sync | Manual re-upload |
 | **Cache-aware tokens** | Shows cache hit/miss per API call | Blind token consumption |
+| **Safety** | Backup, path constraints, syntax gate, logic gatekeeper, rollback | No safety layer |
 
 ## Install
 
@@ -49,7 +50,7 @@ This is not a documentation generator. The document is not the endpoint; it is t
 npm install -g codetalk-cli
 ```
 
-Or use it on the fly without installing:
+Or use it on the fly:
 
 ```bash
 npx codetalk-cli init
@@ -63,23 +64,22 @@ Node.js 18+ required.
 # 1. Initialize a semantic map for your project
 codetalk init
 
-# 2. Point it at your LLM
+# 2. Point it at your LLM (interactive menu, or non-interactive)
+codetalk config
+# or:
 codetalk config set --api-url https://api.openai.com/v1 --api-key sk-xxx --model gpt-4.1
 
-# 3. Scan and map your codebase in one shot
-codetalk scan --write
+# 3. Scan and map your codebase (AST + LLM synthesis)
+codetalk scan
 
-# 4. Ask questions about your code
+# 4. Ask questions about your code (uses tools to explore)
 codetalk ask "How does authentication work?"
 
 # 5. Generate a plan for a change
 codetalk plan "Add rate limiting"
 
-# 6. Execute the plan (applies file changes in parallel)
+# 6. Execute the plan — applies changes, validates, auto-syncs map
 codetalk exec
-
-# 7. Sync the map after editing
-codetalk sync
 ```
 
 Config is stored at `~/.codetalker/config.json`. Environment variables are also supported:
@@ -92,31 +92,45 @@ CODETALKER_MODEL=gpt-4.1
 
 ## How It Works
 
-codetalk orchestrates multiple LLM agents per operation, each with its own progress line displayed on stderr:
+### AST-Based Scan
+
+codetalk scan uses language-specific AST extractors (no LLM) to index symbols, then sends a compact index to the LLM for synthesis:
 
 ```
-✓ coordinator: Building file inspection plan (coordinator)...
-✓ reviewer 1: 2 files reviewed
-✓ reviewer 2: 1 files reviewed
-✓ merger: Semantic map generated
+scan ── collect files ── AST extract ── symbol index ── merger (LLM) ── CODEMAP.md
+                            │
+              ┌─────────────┼─────────────┐
+        python.ts       ts.ts        cpp.ts      asm.ts
+         (ast)       (ts-morph)     (regex)     (regex)
 ```
 
-In a real terminal (`isTTY`), these lines update in place. In CI or piped output, they print as plain lines on completion.
+Supports: Python (AST), TypeScript/JavaScript (ts-morph with regex fallback), C/C++ (regex), Assembly MASM/NASM/GAS (regex).
 
-### Multi-Agent Scan
+### Tool-Enhanced Q&A
 
-```
-scan ── coordinator ──> inspection plan
-         ├── reviewer 1 ──> file notes
-         ├── reviewer 2 ──> file notes
-         └── merger ──────> complete CODEMAP.md
-```
-
-### Plan → Execute → Sync
+`ask` and `plan` use a multi-turn tool-calling loop. The LLM can grep, read files, list directories, and search the symbol index before responding:
 
 ```
-plan ──> CODEPLAN.md ──> exec ──> file changes ──> sync ──> updated CODEMAP.md
+ask ── LLM decides → grep "class AgentSwarm" → read results → answer
+     turn 1              turn 2               turn 3       done
 ```
+
+### Safe Execution
+
+Every `codetalk exec` follows a hardened safety chain:
+
+```
+plan → coordinator (LLM) → editors (parallel) → backup → syntax check
+  → diff apply (git apply) → gatekeeper (LLM) → auto-sync → manifest
+```
+
+Safety features:
+- **Backup** to `.codetalk/backups/<timestamp>/` with directory structure preserved
+- **Git diff apply** for surgical changes (no full-file rewrite)
+- **Syntax gate** for Python files (`ast.parse`)
+- **Gatekeeper agent** validates program logic, retries on failure
+- **Rollback**: `codetalk rollback <id>` restores files, deletes new ones
+- **Timeout**: `--timeout N` (ms), default 180s
 
 ## CLI Reference
 
@@ -128,9 +142,9 @@ plan ──> CODEPLAN.md ──> exec ──> file changes ──> sync ──> 
 | `--api-url URL` | LLM API endpoint |
 | `--api-key KEY` | LLM API key |
 | `--model MODEL` | LLM model name |
-| `--parallel N` | Parallel agent count (default: 4) |
-| `--stream` | Stream LLM response to stdout |
-| `--help` | Show this guide |
+| `--timeout MS` | API request timeout (default: 180000) |
+| `--parallel N` | Parallel editor agents for exec (default: 4) |
+| `--help` | Show command-specific help |
 
 ### Commands
 
@@ -140,13 +154,13 @@ plan ──> CODEPLAN.md ──> exec ──> file changes ──> sync ──> 
 | `config` | Interactive provider/API configuration menu |
 | `config set --api-url URL --api-key KEY [--model MODEL]` | Non-interactive config |
 | `config show` | Display masked config |
-| `scan [--write] [--json] [--stream] [--parallel N]` | Run parallel LLM reviewers to produce architecture semantics |
+| `scan [--depth low|medium|high|full] [--timeout MS]` | Analyze repository with AST extraction + LLM synthesis |
 | `map` | Generate a baseline semantic map from repo structure |
-| `ask "question" [--stream]` | Answer codebase questions using LLM |
-| `plan "request" [--stream] [--out FILE]` | Generate an implementation plan and write to disk |
-| `exec [--plan FILE] [--parallel N] [--stream]` | Execute a plan: apply file changes in parallel via LLM |
-| `sync [--stream]` | Sync changes into the semantic map via LLM |
+| `ask "question"` | Answer codebase questions using tools + LLM |
+| `plan "request" [--out FILE]` | Generate an implementation plan and write to disk |
+| `exec [--plan FILE] [--parallel N] [--timeout MS]` | Execute a plan: apply file changes, validate, sync map |
 | `check` | Fail if the map is missing or stale |
+| `rollback [--list | <id>]` | Restore files from a previous exec backup |
 | `version` | Print version and exit |
 
 ### Token Usage
@@ -166,19 +180,24 @@ POST {apiUrl}/chat/completions
 Authorization: Bearer {apiKey}
 ```
 
-Works with OpenAI, Anthropic (via proxy), Ollama (local), and any provider offering an OpenAI-compatible endpoint.
+Works with OpenAI, DeepSeek, Anthropic (via proxy), Ollama (local), and any provider offering an OpenAI-compatible endpoint.
 
 ## Repository Shape
 
 ```text
-codetalk-cli/
-  src/index.ts                  CLI source
-  dist/index.js                 Built entrypoint
-  scripts/test-cli.mjs          Smoke tests
-  SKILL.md                      AI agent workflow contract
-  CODEMAP.md                    This repo's semantic map
-  references/repo-semantic-map.md
-  references/semantic-map-template.md
+codetalk/
+  src/
+    index.ts          CLI entry point
+    api.ts            LLM API calls + tool-calling loop
+    handlers.ts       Command implementations
+    panel.ts          MissionPanel (TTY progress)
+    indexer.ts        Symbol index builder
+    prompts.ts        All agent prompts
+    tools/            6 tools (grep/read/ls/glob/stat/git_log)
+    ast/              4 language extractors (python/ts/cpp/asm)
+  scripts/test-cli.mjs  Smoke tests
+  SKILL.md              AI agent workflow contract
+  CODEMAP.md            This repo's semantic map
 ```
 
 ## License

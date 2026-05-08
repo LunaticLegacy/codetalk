@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/logo.png" alt="codetalk" width="80" />
-</p>
-
 <h2 align="center">codetalk</h2>
 
 <p align="center">
@@ -40,23 +36,22 @@ npx codetalk-cli init
 # 1. 初始化语义图
 codetalk init
 
-# 2. 配置 LLM API
+# 2. 配置 LLM API（交互菜单或直接设置）
+codetalk config
+# 或:
 codetalk config set --api-url https://api.openai.com/v1 --api-key sk-xxx --model gpt-4.1
 
-# 3. 扫描代码库并生成语义图
-codetalk scan --write
+# 3. AST 提取 + LLM 合成语义图
+codetalk scan
 
-# 4. 向代码库提问
+# 4. 通过工具探索代码库（grep/read 等）
 codetalk ask "认证怎么工作的？"
 
 # 5. 生成修改计划
 codetalk plan "给 API 加上限流"
 
-# 6. 执行计划
+# 6. 执行计划 — 备份、diff 应用、验证、自动同步语义图
 codetalk exec
-
-# 7. 修改后刷新语义图
-codetalk sync
 ```
 
 配置存储于 `~/.codetalker/config.json`，也支持环境变量：
@@ -72,14 +67,14 @@ CODETALKER_MODEL=gpt-4.1
 | 命令 | 说明 |
 |------|------|
 | `init` | 创建 `CODEMAP.md` 模板 |
-| `config` | 输入或查看 API 配置 |
-| `scan [--write] [--json] [--stream] [--parallel N]` | 运行并行 LLM 审查器生成架构语义 |
+| `config` | 交互式 Provider/API 配置菜单 |
+| `scan [--depth low|medium|high|full]` | AST 提取 + LLM 合成 CODEMAP.md |
 | `map` | 从仓库结构生成基础语义图 |
-| `ask "问题" [--stream]` | 使用 LLM 解答代码库问题 |
-| `plan "需求" [--stream] [--out FILE]` | 生成实施计划并写入磁盘 |
-| `exec [--plan FILE] [--parallel N] [--stream]` | 执行计划：通过 LLM 并行应用文件修改 |
-| `sync [--stream]` | 通过 LLM 将变更同步进语义图 |
+| `ask "问题"` | 使用工具探索 + LLM 回答代码库问题 |
+| `plan "需求" [--out FILE]` | 生成实施计划并写入磁盘 |
+| `exec [--plan FILE] [--parallel N] [--timeout MS]` | 执行计划：备份 → diff 应用 → 验证 → 自动同步 |
 | `check` | 语义图缺失或过期时返回非零 |
+| `rollback [--list | <id>]` | 恢复 exec 备份的文件 |
 | `version` | 打印版本号 |
 
 ## 许可证
