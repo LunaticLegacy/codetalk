@@ -124,6 +124,10 @@ class MissionPanel {
   }
 }
 
+const { version: VERSION } = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8")
+) as { version: string };
+
 const DEFAULT_MAP_PATH = "CODEMAP.md";
 const DEFAULT_PLAN_PATH = "CODEPLAN.md";
 const DEFAULT_MODEL = "gpt-4.1";
@@ -181,6 +185,11 @@ async function main(): Promise<void> {
 
   if (command === "help" || command === "--help" || command === "-h") {
     printHelp();
+    return;
+  }
+
+  if (command === "version" || command === "--version" || command === "-V") {
+    printVersion();
     return;
   }
 
@@ -311,8 +320,12 @@ function parseOptions(args: string[]): CliOptions {
   return { cwd, mapPath, outPath, json, stream, llm, write, parallel: normalizeParallel(parallel), apiUrl, apiKey, model, message: operands.join(" ").trim() };
 }
 
+function printVersion(): void {
+  console.log(`codetalker v${VERSION}`);
+}
+
 function printHelp(): void {
-  console.log(`codetalker - maintain a living semantic map for agentic code changes
+  console.log(`codetalker v${VERSION} - maintain a living semantic map for agentic code changes
 
 Usage:
   codetalker init [--map CODEMAP.md]
@@ -325,16 +338,18 @@ Usage:
   codetalker plan "Add magic-link login" [--stream] [--write] [--out CODEPLAN.md]
   codetalker sync [--map CODEMAP.md] [--llm] [--stream]
   codetalker check [--map CODEMAP.md]
+  codetalker version
 
 Commands:
-  init   Create a semantic map template if one does not exist
-  config Manually enter and store API URL, API key, and model
-  scan   Inspect source locally; with --llm, use parallel reviewers
-  map    Generate a baseline semantic map from the current repo shape
-  ask    Ask a codebase question using the semantic map as context
-  plan   Generate an implementation plan; with --write, save it to disk
-  sync   Sync observed code changes back into the semantic map; does not execute plans
-  check  Fail if the semantic map is missing or older than source files
+  init    Create a semantic map template if one does not exist
+  config  Manually enter and store API URL, API key, and model
+  scan    Inspect source locally; with --llm, use parallel reviewers
+  map     Generate a baseline semantic map from the current repo shape
+  ask     Ask a codebase question using the semantic map as context
+  plan    Generate an implementation plan; with --write, save it to disk
+  sync    Sync observed code changes back into the semantic map; does not execute plans
+  check   Fail if the semantic map is missing or older than source files
+  version Print version and exit
 
 User guide:
   Need to start a repo        codetalker init
@@ -352,6 +367,7 @@ User guide:
   Need sync progress          codetalker sync --stream
   Need semantic sync          codetalker sync --llm --stream
   Need CI freshness checks    codetalker check
+  Need version info           codetalker version
 
 The map is not just documentation. It is the shared semantic contract an
 AI agent should read before editing and update after changing code.`);
@@ -1204,6 +1220,15 @@ async function runPromptCapture(options: CliOptions, prompt: string, panel?: Mis
   return callChatCompletion(options, prompt, panel, agentId);
 }
 
+type TokenUsage = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  prompt_tokens_details?: {
+    cached_tokens?: number;
+  };
+};
+
 async function callChatCompletion(options: CliOptions, prompt: string, panel?: MissionPanel, agentId?: string): Promise<string> {
   const config = readConfig(options);
   const endpoint = `${trimTrailingSlash(config.apiUrl)}/chat/completions`;
@@ -1242,17 +1267,32 @@ async function callChatCompletion(options: CliOptions, prompt: string, panel?: M
     progress("Reading model response.");
     const payload = await response.json() as {
       choices?: Array<{ message?: { content?: string } }>;
+      usage?: TokenUsage;
     };
     const content = payload.choices?.[0]?.message?.content;
     if (!content) {
       fail("API response did not include choices[0].message.content.");
     }
 
+    showTokenUsage(payload.usage);
     progress("Model response received.");
     return content;
   } finally {
     progress(undefined);
   }
+}
+
+function showTokenUsage(usage: TokenUsage | undefined): void {
+  if (!usage) return;
+
+  const promptPart = `↑${usage.prompt_tokens}`;
+  const cachePart = usage.prompt_tokens_details?.cached_tokens
+    ? ` (cache hit: ${usage.prompt_tokens_details.cached_tokens}, cache miss: ${usage.prompt_tokens - usage.prompt_tokens_details.cached_tokens})`
+    : "";
+  const outputPart = `↓${usage.completion_tokens}`;
+  const totalPart = `${usage.total_tokens}`;
+
+  process.stderr.write(`[tokens] Input: ${promptPart}${cachePart}, Output: ${outputPart}, Total: ${totalPart}\n`);
 }
 
 function makePanelProgress(panel: MissionPanel, agentId: string): (message: string | undefined) => void {
@@ -1314,24 +1354,30 @@ async function streamChatCompletion(options: CliOptions, prompt: string): Promis
   const decoder = new TextDecoder();
   let buffer = "";
   let content = "";
+  let usage: TokenUsage | undefined;
 
   for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
     buffer += decoder.decode(chunk, { stream: true });
     const flushed = flushStreamEvents(buffer);
     content += flushed.content;
+    if (flushed.usage) usage = flushed.usage;
     buffer = flushed.remainder;
   }
 
   buffer += decoder.decode();
-  content += flushStreamEvents(buffer).content;
+  const flushed = flushStreamEvents(buffer);
+  content += flushed.content;
+  if (flushed.usage) usage = flushed.usage;
   process.stdout.write("\n");
+  showTokenUsage(usage);
   return content;
 }
 
-function flushStreamEvents(buffer: string): { remainder: string; content: string } {
+function flushStreamEvents(buffer: string): { remainder: string; content: string; usage?: TokenUsage } {
   const events = buffer.split(/\r?\n\r?\n/);
   const remainder = events.pop() ?? "";
   let content = "";
+  let usage: TokenUsage | undefined;
 
   for (const event of events) {
     for (const line of event.split(/\r?\n/)) {
@@ -1347,7 +1393,11 @@ function flushStreamEvents(buffer: string): { remainder: string; content: string
       try {
         const parsed = JSON.parse(data) as {
           choices?: Array<{ delta?: { content?: string } }>;
+          usage?: TokenUsage;
         };
+        if (parsed.usage) {
+          usage = parsed.usage;
+        }
         const deltaContent = parsed.choices?.[0]?.delta?.content;
         if (deltaContent) {
           process.stdout.write(deltaContent);
@@ -1359,7 +1409,7 @@ function flushStreamEvents(buffer: string): { remainder: string; content: string
     }
   }
 
-  return { remainder, content };
+  return { remainder, content, usage };
 }
 
 function sanitizeMarkdownMap(markdown: string): string {

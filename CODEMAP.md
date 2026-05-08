@@ -5,7 +5,7 @@ Read it before modifying code. Update it after changing behavior.
 
 ## Architecture
 
-- **What the system does**: CLI tool (`codetalker`) that helps AI coding agents understand repository semantics via a semantic map (CODEMAP.md). It provides commands to initialize, scan, map, ask, plan, sync, and check the map. Uses optional LLM integration (OpenAI-compatible API) for advanced analysis.
+- **What the system does**: CLI tool (`codetalker`) that helps AI coding agents understand repository semantics via a semantic map (CODEMAP.md). It provides commands to initialize, scan, map, ask, plan, sync, check, and version. Uses optional LLM integration (OpenAI-compatible API) for advanced analysis. After each API call, token usage (input with cache hit/miss breakdown, output, total) is displayed on stderr.
 - **Main execution path**: `src/index.ts` is the entry point (#!/usr/bin/env node). It parses CLI arguments manually (no third-party CLI libraries), dispatches to command handlers. Commands may read/write files, spawn `git` processes, and make HTTP calls to an LLM API.
 - **Major components and dependencies**:
   - **CLI handler** (`src/index.ts`) – single-file implementation of all commands.
@@ -38,6 +38,7 @@ All types are defined in `src/index.ts` (no explicit exports). Observed through 
 | `SourceSummary` | Aggregate summary of source files. | `files[]`, `totalSize`, `languageBreakdown` | – |
 | `ScanReport` | Full report from `scan` command. | `summary`, `entryCandidates`, `modules` (inferred roles), `ci`, `package`, `config`, `semanticMaps`, `gitChanged` | – |
 | `CodetakerConfig` | Configuration loaded from file or env. | `apiUrl`, `apiKey`, `model` (all optional strings). | – |
+| `TokenUsage` | Token usage returned by LLM API. | `prompt_tokens: number`, `completion_tokens: number`, `total_tokens: number`, `prompt_tokens_details?: { cached_tokens?: number }` | – |
 
 ## Functions
 
@@ -101,9 +102,11 @@ All types are defined in `src/index.ts` (no explicit exports). Observed through 
 | `fail(msg)` | Print error and exit. | `msg: string` | `never` (calls `process.exit(1)`) | Writes to stderr. | – | Process terminates. | – |
 | `getExtension(path)` | Return file extension. | `path: string` | `string` | None | – | – | – |
 | `normalizePath(p)` | Resolve relative to absolute. | `p: string` | `string` | None | – | – | – |
-| `callChatCompletion(options, prompt, panel?, agentId?)` | Send non‑streaming prompt to LLM API. When panel+agentId provided, uses `makePanelProgress` for in‑panel wait feedback. | `options: CliOptions`, `prompt: string`, `panel?: MissionPanel`, `agentId?: string` | `Promise<string>` | Makes HTTP POST to `{apiUrl}/chat/completions`. | API configured, network reachable. | Response parsed and returned. | Fails on HTTP error or missing `content`. |
-| `streamChatCompletion(options, prompt)` | Send streaming prompt to LLM API, write chunks to stdout in real time. | `options: CliOptions`, `prompt: string` | `Promise<string>` (full accumulated content) | Makes HTTP POST with `stream: true`; writes each SSE chunk's delta content to stdout immediately. | API configured, network reachable. | Full response returned, newline written to stdout. | Fails on HTTP error or missing stream body. |
-| `flushStreamEvents(buffer)` | Parse SSE buffer, extract `data:` lines, write delta content to stdout. | `buffer: string` | `{remainder: string, content: string}` | Writes delta content to stdout via `process.stdout.write`. | – | Buffer consumed. | – |
+| `callChatCompletion(options, prompt, panel?, agentId?)` | Send non‑streaming prompt to LLM API. Displays token usage via `showTokenUsage` after response. | `options: CliOptions`, `prompt: string`, `panel?: MissionPanel`, `agentId?: string` | `Promise<string>` | Makes HTTP POST to `{apiUrl}/chat/completions`. Writes `[tokens]` line to stderr. | API configured, network reachable. | Response parsed and returned. | Fails on HTTP error or missing `content`. |
+| `streamChatCompletion(options, prompt)` | Send streaming prompt to LLM API. Sends `stream_options: { include_usage: true }` for token tracking. | `options: CliOptions`, `prompt: string` | `Promise<string>` (full accumulated content) | Makes HTTP POST with `stream: true`; writes each SSE chunk's delta content to stdout immediately. On completion, calls `showTokenUsage` with parsed usage. | API configured, network reachable. | Full response returned, newline written to stdout, token usage to stderr. | Fails on HTTP error or missing stream body. |
+| `flushStreamEvents(buffer)` | Parse SSE buffer, extract `data:` lines, write delta content to stdout. Also captures `usage` from SSE events that include it. | `buffer: string` | `{remainder: string, content: string, usage?: TokenUsage}` | Writes delta content to stdout via `process.stdout.write`. | – | Buffer consumed. | – |
+| `showTokenUsage(usage)` | Format and display token usage to stderr. Shows input (with cache hit/miss breakdown when available), output, and total. | `usage: TokenUsage \| undefined` | `void` | Writes `[tokens] Input: ↑N (cache hit: M, cache miss: K), Output: ↓N, Total: N\n` to stderr. | – | – | No‑op if `usage` is undefined. |
+| `printVersion()` | Print version string to stdout. | None | `void` | Writes `codetalker vX.Y.Z\n` to stdout. | – | – | – |
 | `getChangedFiles()` | Get list of changed files via `git diff --name-only` (or similar). | `cwd: string` | `string[]` | Spawns `git` process. | Git binary available. | – | Throws if git fails. |
 | `replaceSection(content, sectionName, newContent)` | Replace a section in a markdown file. | `content, sectionName, newContent: strings` | `string` | None | – | – | – |
 | `buildChangeSync(changedFiles)` | Build change sync markdown section. | `changedFiles: string[]` | `string` | None | – | – | – |
@@ -121,10 +124,11 @@ All types are defined in `src/index.ts` (no explicit exports). Observed through 
 
 ### Startup
 1. `src/index.ts` is invoked as `node dist/index.js [command] [args]`.
-2. `main()` is called.
+2. `main()` reads `VERSION` from `package.json` at module level.
 3. `parseOptions()` parses `process.argv.slice(2)` into `CliOptions`.
 4. Command dispatch:
    - `help` → `printHelp()` → exit 0.
+   - `version`/`--version`/`-V` → `printVersion()` → exit 0.
    - `init` → `initMap()` → write template `CODEMAP.md` → exit 0.
    - `config` → `configure()` → read/write config → exit 0.
    - `scan` → `scanRepo()` → collect files, build report, output.
@@ -134,6 +138,17 @@ All types are defined in `src/index.ts` (no explicit exports). Observed through 
    - `sync` → `syncMap()` → read git changes, update map; if `--llm`, call `runSemanticSync()`.
    - `check` → `checkMap()` → validate map; fails if missing or stale.
 5. On unrecognized command → `fail()`.
+
+### Token Usage Display
+After each LLM API call, `showTokenUsage` writes a summary line to stderr:
+
+```
+[tokens] Input: ↑150 (cache hit: 30, cache miss: 120), Output: ↓50, Total: 200
+```
+
+- For **non‑streaming** calls: `usage` is parsed from the JSON response body.
+- For **streaming** calls: `stream_options: { include_usage: true }` is sent; the final SSE event before `[DONE]` includes the usage object, which is captured by `flushStreamEvents`.
+- If no `usage` field is present in the API response (e.g., proxied / non‑standard endpoints), the line is silently skipped.
 
 ### Normal Execution (without LLM)
 - `scan` outputs scan report to stdout (text or JSON).
