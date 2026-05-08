@@ -898,7 +898,8 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
   const indexBlock = index
     ? Object.entries(index.files).map(([path, info]) =>
         `- ${path} (${info.language}, ${info.size}b)` +
-        (info.exports.length ? ` exports: ${info.exports.join(", ")}` : "") +
+        (info.functions.length ? ` funcs: ${info.functions.join(", ")}` : "") +
+        (info.types.length ? ` types: ${info.types.join(", ")}` : "") +
         (info.imports.length ? ` imports: ${info.imports.join(", ")}` : "")
       ).join("\n")
     : "(no index available)";

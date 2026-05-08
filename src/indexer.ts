@@ -14,6 +14,8 @@ export interface SymbolIndex {
 export interface FileSymbols {
   exports: string[];
   imports: string[];
+  functions: string[];
+  types: string[];
   size: number;
   language: string;
 }
@@ -33,6 +35,8 @@ export function buildSymbolIndex(cwd: string): SymbolIndex {
     index.files[normalizePath(relPath)] = {
       exports: symbols.exports,
       imports: symbols.imports,
+      functions: symbols.functions,
+      types: symbols.types,
       size,
       language
     };
@@ -116,6 +120,8 @@ export function loadIndex(cwd: string): SymbolIndex | null {
 interface SymbolExtract {
   exports: string[];
   imports: string[];
+  functions: string[];
+  types: string[];
 }
 
 function walkSourceFiles(cwd: string, cb: (relPath: string, absPath: string, ext: string) => void): void {
@@ -173,7 +179,7 @@ function extractSymbols(filePath: string, ext: string): SymbolExtract {
     case ".cjs":
       return extractJsTsSymbols(filePath);
     default:
-      return { exports, imports };
+      return { exports, imports, functions: [], types: [] };
   }
 }
 
@@ -186,14 +192,15 @@ function extractPythonSymbols(filePath: string): SymbolExtract {
       "import ast, sys, json",
       `with open(sys.argv[1]) as f:`,
       `    tree = ast.parse(f.read())`,
-      `    exports = [n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef))]`,
+      `    funcs = [n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]`,
+      `    types = [n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]`,
       `    imports = []`,
       `    for n in ast.walk(tree):`,
       `        if isinstance(n, ast.Import):`,
       `            imports.extend(a.name for a in n.names)`,
       `        elif isinstance(n, ast.ImportFrom):`,
       `            if n.module: imports.append(n.module)`,
-      `    print(json.dumps({"exports": exports, "imports": imports}))`
+      `    print(json.dumps({"exports": funcs + types, "imports": imports, "functions": funcs, "types": types}))`
     ].join("\n");
 
     const output = execFileSync("python", ["-c", script, filePath], {
@@ -204,7 +211,7 @@ function extractPythonSymbols(filePath: string): SymbolExtract {
 
     return JSON.parse(output.trim()) as SymbolExtract;
   } catch {
-    return { exports: [], imports: [] };
+    return { exports: [], imports: [], functions: [], types: [] };
   }
 }
 
@@ -214,40 +221,49 @@ function extractPythonSymbols(filePath: string): SymbolExtract {
 function extractJsTsSymbols(filePath: string): SymbolExtract {
   const exports: string[] = [];
   const imports: string[] = [];
+  const functions: string[] = [];
+  const types: string[] = [];
 
   let content: string;
   try {
     content = readFileSync(filePath, "utf8");
   } catch {
-    return { exports, imports };
+    return { exports, imports, functions, types };
   }
 
-  // Extract exports
-  const exportRegex = /export\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum|abstract\s+class)\s+(\w+)/g;
-  let match;
-  while ((match = exportRegex.exec(content)) !== null) {
-    exports.push(match[1]);
+  // Extract function exports
+  const funcRegex = /export\s+(?:default\s+)?(?:async\s+)?function\s+(\w+)/g;
+  let m;
+  while ((m = funcRegex.exec(content)) !== null) {
+    functions.push(m[1]);
+    exports.push(m[1]);
   }
 
-  // Also handle `export default` without a name — use "default"
-  if (/export\s+default\s/.test(content) && !exportRegex.test(content)) {
-    // Check if it's a named default (like `export default class Foo`)
-    // Already handled above; any unnamed default just gets tagged
+  // Extract class/type/interface exports
+  const typeRegex = /export\s+(?:default\s+)?(?:class|type|interface|enum|abstract\s+class)\s+(\w+)/g;
+  while ((m = typeRegex.exec(content)) !== null) {
+    types.push(m[1]);
+    exports.push(m[1]);
+  }
+
+  // Extract const/let/var exports
+  const varRegex = /export\s+(?:default\s+)?(?:const|let|var)\s+(\w+)/g;
+  while ((m = varRegex.exec(content)) !== null) {
+    exports.push(m[1]);
   }
 
   // Extract imports
   const importRegex = /import\s+(?:\{[^}]*\}|[\w*]+)\s*from\s+['"]([^'"]+)['"]/g;
-  while ((match = importRegex.exec(content)) !== null) {
-    imports.push(match[1]);
+  while ((m = importRegex.exec(content)) !== null) {
+    imports.push(m[1]);
   }
 
-  // Also handle `import 'module'` side-effect imports
   const sideEffectRegex = /import\s+['"]([^'"]+)['"]/g;
-  while ((match = sideEffectRegex.exec(content)) !== null) {
-    if (!imports.includes(match[1])) {
-      imports.push(match[1]);
+  while ((m = sideEffectRegex.exec(content)) !== null) {
+    if (!imports.includes(m[1])) {
+      imports.push(m[1]);
     }
   }
 
-  return { exports, imports };
+  return { exports, imports, functions, types };
 }

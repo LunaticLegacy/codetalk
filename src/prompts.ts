@@ -398,10 +398,14 @@ export function reviewerPrompt(
 ): string {
   return `You are Codetalker file analyzer.
 
-Output a SINGLE LINE per file. Format:
-ROLE: <one sentence about what this file does>
+For this file output:
+ROLE: <one sentence about its role>
 EXPORTS: <comma-separated list of exported symbols>
 IMPORTS: <comma-separated list of import sources>
+FUNCTIONS: <comma-separated list of function names with brief purpose in parentheses>
+TYPES: <comma-separated list of type/class names>
+
+Keep each field concise. No explanations or descriptions beyond what's requested.
 
 File: ${file.path} (${file.language}, ${file.bytes} bytes)
 
