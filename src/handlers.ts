@@ -54,11 +54,12 @@ import {
 } from "./utils.js";
 import { buildSymbolIndex, loadIndex, saveIndex } from "./indexer.js";
 import {
+  COMMANDS,
+  PROVIDERS,
+  SOURCE_EXTENSIONS,
   DEFAULT_API_URL,
   DEFAULT_MODEL,
-  DEFAULT_PLAN_PATH,
-  PROVIDERS,
-  SOURCE_EXTENSIONS
+  DEFAULT_PLAN_PATH
 } from "./constants.js";
 
 // ── init ─────────────────────────────────────────────────────────────────────
@@ -477,7 +478,7 @@ function providerLabel(id: string | undefined): string {
 // Scan
 
 export async function scanRepo(options: CliOptions): Promise<void> {
-  process.stderr.write("[codetalk] Collecting source files...\n");
+  process.stderr.write("[codetalk] Scanning repository...\n");
   const report = buildScanReport(options);
 
   if (options.json) {
