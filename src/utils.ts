@@ -10,17 +10,30 @@ import { DEFAULT_API_URL, DEFAULT_MAP_PATH, DEFAULT_MODEL, DEFAULT_PLAN_PATH, SO
 
 export function collectSourceFiles(root: string): SourceFile[] {
   const files: SourceFile[] = [];
+  const gitignorePatterns = loadGitignore(root);
 
   function visit(directory: string): void {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      // Skip hidden files and directories (starting with .)
+      if (entry.name.startsWith(".")) {
+        continue;
+      }
+
+      const fullPath = join(directory, entry.name);
+
       if (entry.isDirectory()) {
         if (!IGNORED_DIRS.has(entry.name)) {
-          visit(join(directory, entry.name));
+          visit(fullPath);
         }
         continue;
       }
 
       if (!entry.isFile()) {
+        continue;
+      }
+
+      // Skip files matched by .gitignore
+      if (isGitignored(gitignorePatterns, root, fullPath)) {
         continue;
       }
 
@@ -30,7 +43,6 @@ export function collectSourceFiles(root: string): SourceFile[] {
         continue;
       }
 
-      const fullPath = join(directory, entry.name);
       files.push({
         path: normalizePath(relative(root, fullPath)),
         language,
@@ -41,6 +53,32 @@ export function collectSourceFiles(root: string): SourceFile[] {
 
   visit(root);
   return files.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** Load and parse .gitignore patterns from the project root. */
+function loadGitignore(root: string): string[] {
+  const gitignorePath = join(root, ".gitignore");
+  if (!existsSync(gitignorePath)) return [];
+
+  return readFileSync(gitignorePath, "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+}
+
+/** Check if a file path matches any .gitignore pattern using git. */
+function isGitignored(patterns: string[], root: string, abspath: string): boolean {
+  if (patterns.length === 0) return false;
+  // Use git check-ignore for accurate matching (handles all pattern types)
+  try {
+    execFileSync("git", ["check-ignore", "-q", abspath], {
+      cwd: root,
+      stdio: ["ignore", "ignore", "ignore"]
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ── Summaries ─────────────────────────────────────────────────────────────────
