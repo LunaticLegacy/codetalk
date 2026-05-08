@@ -3,6 +3,7 @@ import { MissionPanel } from "./panel.js";
 import { trimTrailingSlash, fail, readConfig } from "./utils.js";
 import type { ToolDef, ToolResult } from "./tools/index.js";
 import { executeTool } from "./tools/index.js";
+import { systemPrompt, buildToolDefinitions } from "./prompts.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 180_000;
 
@@ -31,16 +32,7 @@ export async function callChatCompletion(options: CliOptions, prompt: string, pa
         messages: [
           {
             role: "system",
-            content: `You are Codetalker — a senior software architect specialized in code understanding and semantic mapping.
-
-Your workflow:
-1. Read the semantic map first, then the source files.
-2. Distinguish observed behavior from inference.
-3. Be precise about behavior, not just intent.
-4. When summarizing a function or method, always include inputs, outputs, side effects, invariants, and failure modes.
-5. After any code change, update the semantic map to reflect the new behavior.
-
-Treat CODEMAP.md as the current behavioral contract unless source inspection proves it stale. When map and code disagree, trust observed code and note the discrepancy.`
+            content: systemPrompt()
           },
           {
             role: "user",
@@ -94,7 +86,7 @@ export async function streamChatCompletion(options: CliOptions, prompt: string):
       messages: [
         {
           role: "system",
-          content: "You are Codetalker \u2014 a senior software architect specialized in code understanding and semantic mapping.\n\nYour workflow:\n1. Read the semantic map first, then the source files.\n2. Distinguish observed behavior from inference.\n3. Be precise about behavior, not just intent.\n4. When summarizing a function or method, always include inputs, outputs, side effects, invariants, and failure modes.\n5. After any code change, update the semantic map to reflect the new behavior.\n\nTreat CODEMAP.md as the current behavioral contract unless source inspection proves it stale. When map and code disagree, trust observed code and note the discrepancy."
+          content: systemPrompt()
         },
         {
           role: "user",
@@ -388,34 +380,6 @@ function formatToolArgs(args: Record<string, any>): string {
   return `${entries[0][0]}: ${String(entries[0][1]).slice(0, 60)}`;
 }
 
-/** Build a tool-definition block for the system prompt. */
-export function buildToolDefinitions(tools: ToolDef[]): string {
-  const lines: string[] = [];
-  lines.push("<tools>");
-  lines.push("Available tools. When you need to explore the codebase, call a tool using either format:");
-  lines.push('Format 1: {"_tool": "name", "args": {...}}');
-  lines.push('Format 2: <functioncall><invoke name="name"><parameter name="k" string="true">v</parameter></invoke></functioncall>');
-  lines.push("");
-
-  for (const tool of tools) {
-    lines.push(`Tool: ${tool.name}`);
-    lines.push(`  Description: ${tool.description}`);
-    if (tool.args.length > 0) {
-      lines.push("  Args:");
-      for (const arg of tool.args) {
-        const required = arg.required ? " (required)" : "";
-        lines.push(`    ${arg.name} (${arg.type}): ${arg.description}${required}`);
-      }
-    }
-    lines.push("");
-  }
-
-  lines.push("After you receive the tool result, continue your analysis. If you need more info, call another tool.");
-  lines.push("When you have enough information to answer, provide your response in plain text (no JSON tool call).");
-  lines.push("</tools>");
-
-  return lines.join("\n");
-}
 
 export async function callWithTools(
   options: CliOptions,

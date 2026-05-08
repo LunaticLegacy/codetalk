@@ -10,6 +10,21 @@ import { MissionPanel } from "./panel.js";
 import { callChatCompletion, callWithTools, runPrompt, runPromptCapture } from "./api.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import {
+  askSystemPrompt,
+  askStreamingPrompt,
+  buildAgentPrompt as promptsBuildAgentPrompt,
+  buildInspectionPlanPrompt,
+  createExecCoordPrompt,
+  createExecEditorPrompt,
+  gatekeeperPrompt,
+  mergerPrompt,
+  planStreamingPrompt,
+  planSystemPrompt,
+  retryEditorPrompt,
+  reviewerPrompt,
+  semanticSyncPrompt
+} from "./prompts.js";
+import {
   buildMap,
   buildTemplate,
   buildChangeSync,
@@ -515,31 +530,16 @@ export async function askCodebase(options: CliOptions): Promise<void> {
   const question = requireMessage(options, "Ask requires a question. Example: codetalk ask \"How does auth work?\"");
 
   const map = readMapForContext(options);
-  const systemPrompt = `You are analyzing a codebase. Use the tools to explore files when you need specific information.
-
-Semantic contract path: ${options.mapPath}
-
-Semantic contract:
-${map}`;
-
   const panel = new MissionPanel();
   panel.add("ask", "Exploring codebase with tools...");
 
   if (options.stream) {
     // Streaming: use old direct prompt (tools not suitable for streaming)
-    const prompt = `You are analyzing a codebase.
-
-Semantic contract path: ${options.mapPath}
-
-Semantic contract:
-${map}
-
-User request:
-${question}`;
+    const prompt = askStreamingPrompt(map, options.mapPath, question);
     await runPrompt(options, prompt);
     panel.done("ask", "Response streamed");
   } else {
-    const answer = await callWithTools(options, systemPrompt, question, ALL_TOOLS, panel, "ask");
+    const answer = await callWithTools(options, askSystemPrompt(map, options.mapPath), question, ALL_TOOLS, panel, "ask");
     panel.done("ask", `Complete (${answer.length} chars)`);
     panel.finish();
     console.log(answer);
@@ -552,23 +552,12 @@ export async function planChange(options: CliOptions): Promise<void> {
   const request = requireMessage(options, "Plan requires a change request. Example: codetalk plan \"Add magic-link login\"");
 
   const map = readMapForContext(options);
-  const systemPrompt = `You are creating a safe implementation plan. Use the tools to explore the codebase.
-
-Semantic contract:
-${map}`;
-
   const panel = new MissionPanel();
 
   if (options.stream) {
     // Streaming: use old prompt path (tools not suitable for streaming)
     panel.add("plan", "Generating implementation plan...");
-    const prompt = `You are creating a safe implementation plan.
-
-Semantic contract:
-${map}
-
-User request:
-${request}`;
+    const prompt = planStreamingPrompt(map, request);
     const plan = await runPromptCapture(options, prompt, panel, "plan");
     writePlan(options, plan);
     panel.done("plan", `Plan written to ${options.outPath}`);
@@ -578,7 +567,7 @@ ${request}`;
   }
 
   panel.add("plan", "Exploring codebase with tools...");
-  const plan = await callWithTools(options, systemPrompt, request, ALL_TOOLS, panel, "plan");
+  const plan = await callWithTools(options, planSystemPrompt(map), request, ALL_TOOLS, panel, "plan");
 
   writePlan(options, plan);
   panel.done("plan", `Plan written to ${options.outPath}`);
@@ -624,7 +613,7 @@ export async function execution(options: CliOptions): Promise<void> {
   panel.add("coordinator", "Analyzing plan to identify files and change specs...");
 
   // Phase 1: Coordinator extracts affected files and change specs
-  const coordinatorPrompt = createExecCoordPrompt(plan, currentMap, options);
+  const coordinatorPrompt = createExecCoordPrompt(plan, currentMap);
   const { content: coordinatorResult, tokenStr: execCoordTokens } = await callChatCompletion(options, coordinatorPrompt, panel, "coordinator", "Analyzing plan");
 
   const fileSpecs = parseExecChangeSpecs(coordinatorResult);
@@ -652,12 +641,12 @@ export async function execution(options: CliOptions): Promise<void> {
     const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan, currentMap);
     const editDetail = `File ${fileNum}: ${spec.filePath}`;
     const { content: rawContent, tokenStr: editorTokens } = await callChatCompletion(options, editorPrompt, panel, agentId, editDetail);
-    const newContent = stripCodeFence(rawContent);
+    const cleaned = stripCodeFence(rawContent);
 
     return {
       filePath: spec.filePath,
       originalContent: fileContent,
-      newContent,
+      newContent: cleaned,
       action: existsSync(filePath) ? "modified" : "created"
     };
   });
@@ -690,7 +679,7 @@ export async function execution(options: CliOptions): Promise<void> {
       backedUp = true;
     }
 
-    if (r.filePath.endsWith(".py")) {
+    if (r.filePath.endsWith(".py") && r.action !== "modified") {
       panel.update("apply", "Syntax check: " + r.filePath + "...");
       try {
         execFileSync("python", ["-c", "import ast; ast.parse(" + JSON.stringify(r.newContent) + ")"], {
@@ -711,12 +700,39 @@ export async function execution(options: CliOptions): Promise<void> {
   let changedCount = 0;
   for (const r of validated) {
     const fileNum = (changedCount + 1) + "/" + results.length;
-    panel.update("apply", "Writing file " + fileNum + ": " + r.filePath + "...");
     const target = resolve(options.cwd, r.filePath);
-    ensureParentDirectory(target);
-    writeFileSync(target, r.newContent, "utf8");
-    changedCount++;
-    panel.update("apply", "✓ " + r.filePath);
+
+    if (r.action === "modified") {
+      panel.update("apply", "Applying diff to " + r.filePath + "...");
+      try {
+        // Check if the diff applies cleanly
+        execFileSync("git", ["apply", "--check", "-"], {
+          cwd: options.cwd, input: r.newContent,
+          stdio: ["pipe", "pipe", "pipe"], encoding: "utf8"
+        });
+        // Apply the diff
+        execFileSync("git", ["apply", "-"], {
+          cwd: options.cwd, input: r.newContent,
+          stdio: ["pipe", "pipe", "pipe"], encoding: "utf8"
+        });
+        changedCount++;
+        panel.update("apply", "✓ " + r.filePath);
+      } catch {
+        // Git apply failed — try full file write as fallback
+        panel.update("apply", "Diff failed, falling back to full write: " + r.filePath + "...");
+        ensureParentDirectory(target);
+        writeFileSync(target, stripCodeFence(r.newContent), "utf8");
+        changedCount++;
+        panel.update("apply", "✓ " + r.filePath + " (full write)");
+      }
+    } else {
+      // New file — write full content
+      panel.update("apply", "Creating " + r.filePath + "...");
+      ensureParentDirectory(target);
+      writeFileSync(target, r.newContent, "utf8");
+      changedCount++;
+      panel.update("apply", "✓ " + r.filePath);
+    }
   }
 
   // Phase 4: Gatekeeper agent — validate program logic, retry if needed
@@ -738,32 +754,7 @@ export async function execution(options: CliOptions): Promise<void> {
       }
     }
 
-    const gatePrompt = `You are Codetalker gatekeeper. Your job is to validate code changes before they are finalized.
-
-The implementation plan:
-${plan}
-
-Changed files:
-${changedContent.map((f) => `### ${f.path}
-
-\`\`\`
-${f.content}
-\`\`\``).join("\n")}
-
-Check the following:
-1. Import resolution — do all imports reference files/packages that actually exist?
-2. Method/attribute access — do called methods/attributes exist on the target objects/classes?
-3. Consistency — do function signatures match their actual definitions?
-4. Completeness — does the implementation fully satisfy the plan?
-
-If everything passes, return EXACTLY: GATE: PASS
-
-If there are issues, use this format:
-FILE: path
-ISSUE: line number? description
-SUGGESTION: specific fix suggestion
-
-Separate each file's feedback with a blank line.`;
+    const gatePrompt = gatekeeperPrompt(plan, changedContent);
 
     const { content: gateResult, tokenStr: gateTokens } = await callChatCompletion(options, gatePrompt, panel, "gate", "Checking logic");
 
@@ -800,22 +791,18 @@ Separate each file's feedback with a blank line.`;
       panel.update("gate", "Re-editing " + fb.file + "...");
       const filePath = resolve(options.cwd, fb.file);
       const fileContent = existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
-      const retryPrompt = `You are Codetalker file editor fixing an issue.
-
-You previously edited this file. The gatekeeper found a problem:
-ISSUE: ${fb.issue}
-SUGGESTION: ${fb.suggestion}
-
-Original change description:
-${spec.description}
-
-Current file content:
-${fileContent}
-
-Return the COMPLETE new file content with the issue fixed. Only the fix, no markdown fences.`;
+      const retryPrompt = retryEditorPrompt(fb.file, fb.issue, fb.suggestion, spec.description, fileContent);
 
       const { content: fixedContent } = await callChatCompletion(options, retryPrompt, panel, agentId, "Fixing: " + fb.file);
-      writeFileSync(filePath, stripCodeFence(fixedContent), "utf8");
+      const cleaned = stripCodeFence(fixedContent);
+      try {
+        execFileSync("git", ["apply", "-"], {
+          cwd: options.cwd, input: cleaned,
+          stdio: ["pipe", "pipe", "pipe"], encoding: "utf8"
+        });
+      } catch {
+        writeFileSync(filePath, cleaned, "utf8");
+      }
       panel.update("gate", "\u2713 " + fb.file);
     }
   }
@@ -922,45 +909,7 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
     return `\n## Analysis ${i + 1}\n\n${content}`;
   }).join("\n");
 
-  const prompt = `You are Codetalker — a senior software architect producing a living semantic map.
-
-Goal:
-- Synthesize the per-file analyses below into a complete, accurate semantic map that can be written to ${options.mapPath}.
-- This is NOT passive documentation. It is the behavioral contract that AI coding agents will read before modifying code. Every detail matters.
-
-Rules:
-- Return markdown only, starting with "# Code Semantic Map".
-- Include these stable sections: Architecture, Modules, Types, Functions, Runtime Flow, Side Effects, Agent Change Protocol, Change Sync.
-
-For each section:
-- Architecture: Describe what the system does, its main execution path, major components, scale, and design philosophy.
-- Modules: List every module/file with its role, responsibilities, and collaborators in a table.
-- Types: Document each type with purpose, fields, and invariants.
-- Functions: For every function or method, record: purpose, inputs, outputs, side effects, preconditions, postconditions, failure modes.
-- Runtime Flow: Document startup, normal execution paths, error paths, and teardown.
-- Side Effects: List files written, files read, network calls, process spawning, state changes, caches.
-- Agent Change Protocol: Define the before/during/after editing contract.
-- Change Sync: Initialize the change tracking section.
-
-Quality standards:
-- Be precise about behavior, not just intent.
-- Distinguish observed code behavior from inference when ambiguous.
-- When a file was truncated, explicitly state what remains uncertain.
-- Prefer observed reviewer evidence over inference.
-- Prefer concise bullet lists or tables when they improve scanability.
-- If analyses produced conflicting observations, call out the conflict.
-
-Existing semantic map:
-${existingMap}
-
-Repository scan:
-${formatScan(report)}
-
-Coordinator inspection plan:
-${inspectionPlan}
-
-Per-file analyses:
-${perFileAnalyses}`;
+  const prompt = mergerPrompt(existingMap, formatScan(report), inspectionPlan, perFileAnalyses, options.mapPath);
 
   const { content: mapResult, tokenStr: mergerTokens } = await callChatCompletion(options, prompt, panel, "merger", "Synthesizing map");
   const result = sanitizeMarkdownMap(mapResult);
@@ -974,26 +923,7 @@ ${perFileAnalyses}`;
 }
 
 export async function buildInspectionPlan(options: CliOptions, report: ScanReport, existingMap: string, panel?: MissionPanel): Promise<{ content: string; tokenStr: string }> {
-  const prompt = `You are Codetalker coordinator agent.
-
-Goal:
-- List every source file that must be inspected.
-- Identify likely entrypoints, important modules, and inspection priorities.
-- Do not summarize architecture yet; create an inspection plan for reviewer agents.
-
-Rules:
-- Return concise markdown.
-- Include every source file path from the file list.
-- Explicitly call out files that are likely high priority.
-
-Existing semantic map:
-${existingMap}
-
-Repository scan:
-${formatScan(report)}
-
-All source files:
-${report.files.map((file) => `- ${file.path} (${file.language}, ${file.bytes} bytes)`).join("\n") || "- No source files detected."}`;
+  const prompt = buildInspectionPlanPrompt(report, existingMap);
 
   const { content: planContent, tokenStr: planTokens } = await callChatCompletion(options, prompt, panel, panel ? "coordinator" : undefined, panel ? "Planning inspection" : undefined);
   return { content: planContent, tokenStr: planTokens };
@@ -1019,23 +949,7 @@ export async function runReviewerAgents(options: CliOptions, chunks: SourceFile[
         ? readFileSync(fullPath, "utf8").slice(0, 24_000)
         : "(file not found)";
 
-      const prompt = `You are Codetalker file analyzer.
-
-Analyze this single source file. Be precise about what you observe.
-
-Focus on:
-- The file's role and responsibilities
-- Exported types, functions, classes, and their signatures
-- For each function/method: inputs, outputs, side effects, preconditions, failure modes
-- Dependencies (imports/requires)
-- Important invariants and edge cases
-
-Coordinator inspection plan:
-${inspectionPlan}
-
-File: ${file.path} (${file.language}, ${file.bytes} bytes)
-
-\`\`\`\n${content}\n\`\`\``;
+      const prompt = reviewerPrompt(file, content, inspectionPlan);
 
       const { content: analysis, tokenStr } = await callChatCompletion(options, prompt, panel, agentId, `File ${fileNum}: ${file.path}`);
       lastTokenStr = tokenStr;
@@ -1115,28 +1029,8 @@ export async function runSemanticSync(options: CliOptions, currentMap: string, c
     }))
     : collectSourceFiles(options.cwd);
 
-  const prompt = `You are Codetalker syncing a semantic map after repository changes.
-
-Goal:
-- Update the semantic contract to match the observed repository behavior.
-- Preserve useful existing map content when still accurate.
-- Reflect changed module responsibilities, function semantics, runtime flow, side effects, and compatibility impact.
-
-Rules:
-- Return the complete updated markdown map only.
-- Start with "#".
-- Keep stable headings where possible.
-- Trust observed code over the existing semantic map.
-- If changed files are non-source docs/config, update module responsibilities and side effects accordingly.
-
-Changed paths:
-${changedFiles.map((file) => `- ${file}`).join("\n") || "- No git changes detected."}
-
-Current semantic map:
-${currentMap}
-
-Repository evidence:
-${buildRepositoryEvidence(options, filesForEvidence)}`;
+  const evidence = buildRepositoryEvidence(options, filesForEvidence);
+  const prompt = semanticSyncPrompt(currentMap, changedFiles, evidence);
 
   const result = sanitizeMarkdownMap(await runPromptCapture(options, prompt, panel, "sync", "Syncing semantics"));
   panel.done("sync", "Semantic sync complete");
@@ -1178,73 +1072,9 @@ export function buildAgentPrompt(options: CliOptions, taskInstruction: string, u
   const map = readMapForContext(options);
   const scan = formatScan(buildScanReport(options));
 
-  return `${taskInstruction}
-
-Semantic contract path: ${options.mapPath}
-
-Semantic contract:
-${map}
-
-Repository scan:
-${scan}
-
-User request:
-${userMessage}`;
+  return promptsBuildAgentPrompt(taskInstruction, options.mapPath, map, scan, userMessage);
 }
 
-// ── Execution prompts ────────────────────────────────────────────────────────
-
-export function createExecCoordPrompt(plan: string, currentMap: string, options: CliOptions): string {
-  return `You are Codetalker execution coordinator.
-
-Goal:
-- Analyze the implementation plan below and identify every source file that needs to be created or modified.
-- For each file, provide a short but precise description of the changes needed.
-
-Rules:
-- Return a structured list. Format each line as:
-    FILE: <relative-path>
-    CHANGE: <concise description of what to add/remove/modify>
-
-  Separate each file entry with a blank line.
-- Only list files that actually exist in the codebase or need to be created.
-- Use relative file paths (e.g., src/index.ts).
-
-Current semantic map (for context):
-${currentMap}
-
-Implementation plan:
-${plan}`;
-}
-
-export function createExecEditorPrompt(filePath: string, changeDescription: string, currentContent: string, plan: string, currentMap: string): string {
-  return `You are Codetalker file editor.
-
-Context:
-- This file is part of a larger project. The semantic map below describes the project's types, classes, modules, and functions.
-- BEFORE writing code that references symbols (classes, functions, attributes, imports) from OTHER files in the project, check the semantic map to verify those symbols exist.
-- Do NOT invent attributes, methods, function signatures, or import paths — only use what is confirmed in the semantic map or the actual file content below.
-
-Goal:
-- Modify the file ${filePath} according to the change description below.
-- Return the COMPLETE new file content. Do NOT truncate or use placeholders.
-- Preserve all existing code that does not need to change.
-- If the file is new (no existing content), create it from scratch.
-
-Semantic map (project reference):
-${currentMap}
-
-Change description for ${filePath}:
-${changeDescription}
-
-Original content of ${filePath}:
-${currentContent}
-
-Relevant excerpt from implementation plan:
-${plan}
-
-Return ONLY the complete new file content. No explanations, no markdown fences.`;
-}
 
 export function parseExecChangeSpecs(coordinatorOutput: string): Array<{ filePath: string; description: string }> {
   const specs: Array<{ filePath: string; description: string }> = [];
