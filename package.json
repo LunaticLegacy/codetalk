@@ -13,7 +13,8 @@
     "SKILL.md",
     "LICENSE",
     "README.md",
-    "README_EN.md"
+    "README_CN.md",
+    "assets"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
