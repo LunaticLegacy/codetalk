@@ -9,23 +9,24 @@ Read it before modifying code. Update it after changing behavior.
 - **Main execution path**: `src/index.ts` is the entry point (#!/usr/bin/env node). It parses CLI arguments manually (no third-party CLI libraries), dispatches to command handlers. Commands may read/write files, spawn `git` processes, and make HTTP calls to an LLM API.
 - **Major components and dependencies**:
   - **CLI handler** (`src/index.ts`) – single-file implementation of all commands.
-  - **Test suite** (`scripts/test-cli.mjs`) – smoke tests using mock HTTP server.
+  - **Test suite** (`scripts/test-cli.mjs`) – smoke tests using mock HTTP server. Covers most commands, both non-LLM and LLM-dependent flows. Does **not** test `exec` command.
   - **Dependencies**: Node.js built-ins (`fs`, `path`, `os`, `child_process`, `readline/promises`), external `git` binary, optional LLM API endpoint.
   - **MissionPanel**: TTY-aware per-agent progress display used by ALL LLM-based operations (`scan`, `ask`, `plan`, `exec`, `sync --llm`).
-- **Scale**: Single file for all logic; ~48KB `src/index.ts`, ~10KB `scripts/test-cli.mjs`.
+- **Scale**: Single file for all logic; `src/index.ts` is ~56,928 bytes, `scripts/test-cli.mjs` is ~9,610 bytes.
+- **Truncation warning**: The review of `src/index.ts` only covered approximately the first 20% of the file. Functions for LLM API interactions, multi-agent pipeline (`runArchitectureScan`, `execution`, `runReviewerAgents`, etc.), streaming, token usage display, and many helpers were **not visible**. This map includes inferred details from earlier map and the observed CLI behavior reported by tests. Future changes should verify against the full source.
 
 ## Modules
 
 | Module/File | Role | Responsibilities | Collaborators |
 |-------------|------|------------------|---------------|
-| `src/index.ts` | CLI entrypoint & command implementations | Parses arguments, dispatches to `help`, `init`, `config`, `scan`, `map`, `ask`, `plan`, `exec`, `sync`, `check`, `version`. Reads/writes files, spawns git, makes LLM API calls. Includes `MissionPanel` for per-agent progress. | `fs`, `path`, `os`, `child_process`, `readline/promises`, `git`, LLM API |
-| `scripts/test-cli.mjs` | Smoke test suite | Validates CLI behavior under isolated temp directories with a mock HTTP server. Tests all commands. | `child_process`, `fs`, `http`, `os`, `path`, `util`, `url` |
+| `src/index.ts` | CLI entrypoint & command implementations | Parses arguments, dispatches to `help`, `init`, `config`, `scan`, `map`, `ask`, `plan`, `exec`, `sync`, `check`, `version`. Reads/writes files, spawns git, makes LLM API calls. Includes `MissionPanel` for per-agent progress. Covers all command logic, multi-agent scanning, plan execution, map synchronization. | `fs`, `path`, `os`, `child_process`, `readline/promises`, `git`, LLM API |
+| `scripts/test-cli.mjs` | End-to-end smoke test suite | Validates all major commands (`init`, `config`, `map`, `sync`, `scan`, `plan`, `check`, `version`, `help`) in isolated temp directories with mock HTTP server. Tests both streaming and non-streaming LLM flows. Verifies exit codes, output strings, file writes, and API call counts. Does **not** test `exec` command or error handling for network failures / malformed responses. | `child_process`, `fs`, `http`, `os`, `path`, `url`, `util`; the compiled CLI binary at `dist/index.js` |
 
 ## Types
 
 | Type Name | Purpose | Fields | Invariants |
 |-----------|---------|--------|------------|
-| `CliOptions` | Parsed CLI flags and operands. | `cwd`, `mapPath`, `outPath`, `planPath`, `json`, `stream`, `llm`, `write`, `parallel`, `apiUrl?`, `apiKey?`, `model?`, `message` | `parallel` clamped to ≥1 via `normalizeParallel`. |
+| `CliOptions` | Parsed CLI flags and operands. | `cwd`, `mapPath`, `outPath`, `planPath`, `json`, `stream`, `write`, `parallel`, `apiUrl?`, `apiKey?`, `model?`, `message` | `parallel` clamped to ≥1 via `normalizeParallel`. All commands that use LLM do so implicitly (no `--llm` flag). |
 | `SourceFile` | A file found in the repository. | `path`, `language`, `bytes` | – |
 | `SourceSummary` | Aggregate summary of source files. | `count`, `languages`, `entryCandidates` | – |
 | `ScanReport` | Full report from `scan` command. | `root`, `source`, `files`, `commands`, `config`, `semanticMaps`, `packageInfo`, `ci`, `moduleRoles`, `git` | – |
@@ -35,7 +36,7 @@ Read it before modifying code. Update it after changing behavior.
 
 ## Functions
 
-### From `src/index.ts`
+### From `src/index.ts` (observed or inferred from visible portion and tests)
 
 | Function | Purpose | Inputs | Outputs | Side Effects |
 |----------|---------|--------|---------|--------------|
@@ -45,13 +46,15 @@ Read it before modifying code. Update it after changing behavior.
 | `printVersion()` | Print version string. | None | `void` | Writes `codetalker vX.Y.Z` to stdout. |
 | `configure(options)` | Interactive or flag-based config set. | `options: CliOptions` | `Promise<void>` | Writes config file. |
 | `initMap(options)` | Create template CODEMAP.md. | `options: CliOptions` | `void` | Writes CODEMAP.md. |
-| `scanRepo(options)` | Run LLM architecture scan (--llm is always required). | `options: CliOptions` | `Promise<void>` | Builds report, runs multi-agent scan, optionally writes map. |
+| `scanRepo(options)` | Run LLM architecture scan (`--llm` is **required**, fails otherwise). | `options: CliOptions` | `Promise<void>` | Builds report, runs multi-agent scan, optionally writes map. |
 | `writeMap(options)` | Generate baseline semantic map from repo structure. | `options: CliOptions` | `void` | Writes CODEMAP.md. |
 | `syncMap(options)` | Update Change Sync section; optionally run LLM sync. | `options: CliOptions` | `Promise<void>` | Reads git changes, reads/writes CODEMAP.md, calls LLM. |
 | `askCodebase(options)` | Answer question using LLM with map context. | `options: CliOptions` | `Promise<void>` | Calls LLM, outputs response. |
 | `planChange(options)` | Generate implementation plan using LLM. | `options: CliOptions` | `Promise<void>` | Calls LLM, optionally writes plan file. |
 | `execution(options)` | Execute a CODEPLAN.md: apply file changes in parallel via LLM. | `options: CliOptions` | `Promise<void>` | Creates MissionPanel, calls coordinator LLM, dispatches parallel file editors, writes all changes. |
 | `checkMap(options)` | Validate CODEMAP.md exists and is fresh. | `options: CliOptions` | `void` | Reads file timestamps; fails if map missing or stale. |
+| `collectSourceFiles(cwd)` | Walk directory for source files. | `cwd: string` | `SourceFile[]` | Reads file system. |
+| `summarize(sourceFiles)`, `buildScanReport`, `formatScan`, `scanConfigState`, `scanSemanticMaps`, `scanPackageInfo`, `scanCi` | Helper collectors for scan report. | Various | Various parts of `ScanReport` | Read filesystem, git, config, package.json. |
 | `runArchitectureScan(options, report)` | Run multi-agent LLM architecture scan with MissionPanel. | `options, report: ScanReport` | `Promise<string>` | Multiple LLM calls + stderr progress via MissionPanel. |
 | `buildInspectionPlan(options, report, existingMap, panel?)` | Coordinator agent: create file inspection plan. | `options, report, existingMap, panel?` | `Promise<string>` | Calls LLM. |
 | `runReviewerAgents(options, chunks, plan, panel?)` | Run parallel reviewer agents, each inspecting assigned files. | `options, chunks, plan, panel?` | `Promise<string[]>` | Multiple LLM calls, panel updates. |
@@ -75,6 +78,23 @@ Read it before modifying code. Update it after changing behavior.
 | `collectSourceFiles(cwd)` | Walk directory for source files. | `cwd: string` | `SourceFile[]` | Reads file system. |
 | `runLimited(tasks, limit)` | Execute async tasks with concurrency limit. | `tasks, limit: number` | `Promise<any[]>` | May fire multiple LLM requests concurrently. |
 | `splitFilesForAgents(files, parallel)` | Distribute files among reviewer agents. | `files: SourceFile[], parallel: number` | `SourceFile[][]` | None. |
+
+*Note: Many helper functions (e.g., `buildAgentPrompt`, `buildMap`, `normalizeParallel`, `getChangedFiles`, `fail`, `requireMessage`, `ensureParentDirectory`, `maskSecret`, `trimTrailingSlash`) were not visible in the reviewed portion. Their signatures are inferred from the existing map and tests. Confirm with full source before relying on them.*
+
+### From `scripts/test-cli.mjs` (observed)
+
+| Function | Purpose | Inputs | Outputs | Side Effects |
+|----------|---------|--------|---------|--------------|
+| `run(...args)` | Synchronously execute CLI with given args. | `args: string[]` | `string` (stdout) | Spawns child process via `execFileSync`. |
+| `runAsync(...args)` | Asynchronously execute CLI; returns stdout only. | `args: string[]` | `Promise<string>` | Spawns child process via `execFile`. |
+| `runAsyncDetailed(...args)` | Asynchronously execute CLI; returns full result. | `args: string[]` | `Promise<{stdout, stderr}>` | Spawns child process via `execFile`. |
+| `read(path)` | Read file synchronously. | `path: string` | `string` | Reads filesystem. |
+| `assertIncludes(value, expected, label)` | Assert string contains expected substring. | `value: string`, `expected: string`, `label: string` | `void` | Throws on failure. |
+| `testStreamingPrompt(command, message, label)` | Test a streaming prompt command (`ask` or `plan`). | `command, message, label: string` | `Promise<void>` | Starts mock server, invokes CLI, asserts stream flag and concatenated output. |
+| `testLlmMapWrite()` | Test `scan --llm --write --parallel 2` with mock server. | None | `Promise<void>` | Creates test source files, verifies map file contains "LLM Architecture" and exactly 4 API calls. |
+| `testPlanWrite()` | Test `plan --write --out` with mock server. | None | `Promise<void>` | Verifies plan file written with returned content. |
+| `testLlmSyncStream()` | Test `sync --llm --stream` with streaming mock server. | None | `Promise<void>` | Checks output message and that map file is updated with "LLM Architecture". |
+| `withMockServer(callback, options)` | Create single-use mock HTTP server for testing. | `callback: Function`, `options: {stream: boolean}` | `Promise<void>` | Starts server on random port, validates request content-type, returns streaming SSE or JSON response. |
 
 ## Runtime Flow
 
@@ -110,6 +130,9 @@ Read it before modifying code. Update it after changing behavior.
 5. **Apply phase**: `panel.add("apply", "Writing changes to disk...")` → writes all files → `panel.done("apply", "Applied changes to N files")` → `panel.finish()`.
 6. Reports modified/created files to stdout.
 
+### Multi-Agent Scan (`scan --llm`)
+- Observed via test: `scan --llm --write --parallel 2` results in exactly 4 API calls (coordinator + reviewer agents + merger? Details not fully visible). Test expects map file to contain "LLM Architecture" and reviewers' prompts to include "reviewer agent".
+
 ### Token Usage Display
 After each LLM API call, `showTokenUsage` writes to stderr:
 ```
@@ -125,6 +148,8 @@ After each LLM API call, `showTokenUsage` writes to stderr:
 - **Map missing/stale**: `checkMap()` calls `fail()`.
 - **Plan file missing**: `execution()` calls `fail()`.
 - **Coordinator returns no files**: `execution()` calls `fail()`.
+- **Unknown command**: prints help and exits non-zero.
+- **Missing message for ask/plan**: exits with usage hint via `requireMessage`.
 
 ### Teardown
 - Process exits naturally or via `fail()` → `process.exit(1)`.
@@ -138,7 +163,7 @@ After each LLM API call, `showTokenUsage` writes to stderr:
 | `CODEMAP.md` | `init`, `map`, `scan --write`, `sync` | Always or when `--write` set. |
 | `CODEPLAN.md` (default) | `plan --write` | When `--write` flag provided. |
 | Target files from plan | `exec` | Each identified file is created or overwritten. |
-| Config file | `config set` | Always when config command runs. |
+| Config file (`~/.config/codetalker/config.json`) | `config set` | Always when config command runs. |
 
 ### Terminal State Changes
 - **TTY mode**: `MissionPanel` emits `\n` on first render to push panel below the command line, then uses `\x1b[N A` (cursor up) and `\x1b[K` (clear line) on stderr for in-place per-agent progress. `finish()` resets cursor with `\x1b[N B`.
@@ -151,6 +176,7 @@ After each LLM API call, `showTokenUsage` writes to stderr:
 
 ### Process Spawning
 - `execFileSync` for `git status` to detect changed files. No user-supplied arguments; safe from injection.
+- Test suite spawns the CLI binary via `execFileSync`/`execFile`.
 
 ## Agent Change Protocol
 
@@ -158,10 +184,11 @@ After each LLM API call, `showTokenUsage` writes to stderr:
 - **During editing**: Treat this map as the current behavioral contract unless source inspection proves it stale.
 - **After editing**: Update changed module, function, runtime-flow, and side-effect sections in the same change.
 - **If code and map disagree**: Trust observed code, then repair the map before relying on it for further edits.
+- **Truncated areas**: Functions/behaviors not listed here (e.g., `buildAgentPrompt`, `normalizeParallel`, `fail`, `requireMessage`) must be verified against the full source before making changes.
 
 ## Change Sync
 
-Last synchronized: 2026-05-08T05:09:14.048Z
+Last synchronized: 2026-05-08T05:14:39.886Z
 
 Changed files:
 - No git changes detected. If behavior changed outside git, update the relevant sections manually.

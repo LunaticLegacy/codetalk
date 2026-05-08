@@ -34,27 +34,10 @@ try {
   assertIncludes(help, "codetalker v", "help shows version");
   assertIncludes(help, "exec", "help lists exec command");
 
-  // Non-LLM scan should fail
-  try {
-    run("scan");
-    throw new Error("non-LLM scan should have failed");
-  } catch {}
-
-  // LLM scan still works (tested below via testLlmMapWrite)
-
   run("map");
   const mapped = read(join(fixture, "CODEMAP.md"));
   assertIncludes(mapped, "`index.ts`", "map records source module");
   assertIncludes(mapped, "Agent Change Protocol", "map includes agent protocol");
-
-  run("sync");
-  const synced = read(join(fixture, "CODEMAP.md"));
-  assertIncludes(synced, "Last synchronized:", "sync refreshes change section");
-  assertIncludes(synced, "Agent checklist:", "sync includes agent checklist");
-
-  const syncStream = run("sync", "--stream");
-  assertIncludes(syncStream, "[sync] Using semantic map:", "sync --stream prints map progress");
-  assertIncludes(syncStream, "[sync] Writing semantic map.", "sync --stream prints write progress");
 
   await testStreamingPrompt("ask", "what is this?", "ask --stream");
   await testStreamingPrompt("plan", "change this safely", "plan --stream");
@@ -161,14 +144,14 @@ async function testLlmMapWrite() {
 
   await withMockServer(async (apiUrl, bodies) => {
     run("config", "set", "--api-url", apiUrl, "--api-key", "test-secret", "--model", "test-model");
-    const { stdout, stderr } = await runAsyncDetailed("scan", "--llm", "--write", "--parallel", "2");
-    assertIncludes(stdout, "Wrote LLM semantic map:", "scan --llm --write confirms map write");
-    assertIncludes(stderr, "[coordinator] Inspection plan ready", "scan --llm --write shows coordinator progress on stderr");
-    assertIncludes(stderr, "[reviewer ", "scan --llm --write shows reviewer progress on stderr");
-    assertIncludes(stderr, "[merger] Semantic map generated", "scan --llm --write shows merger progress on stderr");
-    assertEqual(bodies.length, 4, "scan --llm --write calls coordinator, two reviewers, and merger");
-    assertIncludes(bodies.join("\n"), "reviewer agent", "scan --llm --write sends reviewer prompts");
-    assertIncludes(read(join(fixture, "CODEMAP.md")), "LLM Architecture", "scan --llm --write lands architecture");
+    const { stdout, stderr } = await runAsyncDetailed("scan", "--write", "--parallel", "2");
+    assertIncludes(stdout, "Wrote LLM semantic map:", "scan --write confirms map write");
+    assertIncludes(stderr, "[coordinator] Inspection plan ready", "scan --write shows coordinator progress on stderr");
+    assertIncludes(stderr, "[reviewer ", "scan --write shows reviewer progress on stderr");
+    assertIncludes(stderr, "[merger] Semantic map generated", "scan --write shows merger progress on stderr");
+    assertEqual(bodies.length, 4, "scan --write calls coordinator, two reviewers, and merger");
+    assertIncludes(bodies.join("\n"), "reviewer agent", "scan --write sends reviewer prompts");
+    assertIncludes(read(join(fixture, "CODEMAP.md")), "LLM Architecture", "scan --write lands architecture");
   }, { stream: false });
 }
 
@@ -184,9 +167,9 @@ async function testPlanWrite() {
 async function testLlmSyncStream() {
   await withMockServer(async (apiUrl) => {
     run("config", "set", "--api-url", apiUrl, "--api-key", "test-secret", "--model", "test-model");
-    const output = await runAsync("sync", "--llm", "--stream");
-    assertIncludes(output, "[sync] Running LLM semantic sync over changed files.", "sync --llm --stream prints LLM progress");
-    assertIncludes(read(join(fixture, "CODEMAP.md")), "LLM Architecture", "sync --llm writes returned semantic map");
+    const output = await runAsync("sync", "--stream");
+    assertIncludes(output, "[sync] Running LLM semantic sync over changed files.", "sync --stream prints LLM progress");
+    assertIncludes(read(join(fixture, "CODEMAP.md")), "LLM Architecture", "sync writes returned semantic map");
   }, { stream: true });
 }
 

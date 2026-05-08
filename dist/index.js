@@ -7,6 +7,7 @@ import { createInterface } from "node:readline/promises";
 class MissionPanel {
     #agents = [];
     #isTTY;
+    #started = false;
     constructor() {
         this.#isTTY = process.stderr.isTTY === true;
     }
@@ -37,6 +38,11 @@ class MissionPanel {
     #render() {
         if (this.#isTTY) {
             const count = this.#agents.length;
+            if (!this.#started) {
+                // On first render, push output to a new line so we don't overwrite the command line
+                this.#started = true;
+                process.stderr.write("\n");
+            }
             // Move cursor up to first panel line, then redraw all
             if (count > 0) {
                 process.stderr.write(`\x1b[${count}A`);
@@ -66,11 +72,12 @@ const COMMANDS = [
     { command: "codetalker help", purpose: "Show commands and user workflow." },
     { command: "codetalker init", purpose: "Create a semantic map template." },
     { command: "codetalker config", purpose: "Manually configure API URL, API key, and model." },
-    { command: "codetalker scan [--llm] [--write] [--stream] [--parallel 4]", purpose: "Inspect locally or ask parallel LLM reviewers to produce architecture semantics." },
+    { command: "codetalker scan [--write] [--stream] [--parallel 4]", purpose: "Use parallel LLM reviewers to produce architecture semantics." },
     { command: "codetalker map", purpose: "Generate a baseline semantic map from repository structure." },
     { command: "codetalker ask \"message\" [--stream]", purpose: "Answer codebase questions from map and scan context." },
     { command: "codetalker plan \"request\" [--stream] [--write] [--out CODEPLAN.md]", purpose: "Generate a safe implementation plan without editing files." },
-    { command: "codetalker sync [--llm] [--stream]", purpose: "Refresh the semantic map change-sync section, optionally with LLM semantic updates." },
+    { command: "codetalker exec [--plan CODEPLAN.md] [--parallel 4] [--stream]", purpose: "Execute a CODEPLAN.md: apply all file changes in parallel via LLM." },
+    { command: "codetalker sync [--stream]", purpose: "Refresh the semantic map change-sync section with LLM semantic updates." },
     { command: "codetalker check", purpose: "Fail when the semantic map is missing or stale." }
 ];
 const SOURCE_EXTENSIONS = new Map([
@@ -108,12 +115,14 @@ const IGNORED_DIRS = new Set([
     "vendor"
 ]);
 async function main() {
-    const [command = "help", ...args] = process.argv.slice(2);
-    const options = parseOptions(args);
-    if (command === "help" || command === "--help" || command === "-h") {
+    const rawArgs = process.argv.slice(2);
+    const [command = "help", ...rest] = rawArgs;
+    // --help / -h on any subcommand prints the full help
+    if (command === "help" || command === "--help" || command === "-h" || rest.includes("--help") || rest.includes("-h")) {
         printHelp();
         return;
     }
+    const options = parseOptions(rest);
     if (command === "version" || command === "--version" || command === "-V") {
         printVersion();
         return;
@@ -163,7 +172,6 @@ function parseOptions(args) {
     let planPath = DEFAULT_PLAN_PATH;
     let json = false;
     let stream = false;
-    let llm = false;
     let write = false;
     let parallel = 4;
     let apiUrl;
@@ -196,10 +204,6 @@ function parseOptions(args) {
             stream = true;
             continue;
         }
-        if (arg === "--llm") {
-            llm = true;
-            continue;
-        }
         if (arg === "--write") {
             write = true;
             continue;
@@ -222,7 +226,7 @@ function parseOptions(args) {
         }
         operands.push(arg);
     }
-    return { cwd, mapPath, outPath, planPath, json, stream, llm, write, parallel: normalizeParallel(parallel), apiUrl, apiKey, model, message: operands.join(" ").trim() };
+    return { cwd, mapPath, outPath, planPath, json, stream, write, parallel: normalizeParallel(parallel), apiUrl, apiKey, model, message: operands.join(" ").trim() };
 }
 function printVersion() {
     console.log(`codetalker v${VERSION}`);
@@ -235,24 +239,24 @@ Usage:
   codetalker config
   codetalker config set --api-url URL --api-key KEY [--model MODEL]
   codetalker config show
-  codetalker scan [--write] [--stream] [--parallel 4]
+  codetalker scan [--write] [--json] [--stream] [--parallel 4]
   codetalker map [--map CODEMAP.md]
   codetalker ask "How does auth work?" [--stream]
   codetalker plan "Add magic-link login" [--stream] [--write] [--out CODEPLAN.md]
   codetalker exec [--plan CODEPLAN.md] [--parallel 4] [--stream]
-  codetalker sync [--map CODEMAP.md] [--llm] [--stream]
+  codetalker sync [--map CODEMAP.md] [--stream]
   codetalker check [--map CODEMAP.md]
   codetalker version
 
 Commands:
   init    Create a semantic map template if one does not exist
   config  Manually enter and store API URL, API key, and model
-  scan    Run parallel LLM reviewers to produce architecture semantics (--llm is implied)
+  scan    Run parallel LLM reviewers to produce architecture semantics
   map     Generate a baseline semantic map from the current repo shape
-  ask     Ask a codebase question using the semantic map as context
-  plan    Generate an implementation plan; with --write, save it to disk
+  ask     Ask a codebase question using LLM
+  plan    Generate an implementation plan using LLM; with --write, save to disk
   exec    Execute a CODEPLAN.md: apply all file changes in parallel via LLM
-  sync    Sync observed code changes back into the semantic map; does not execute plans
+  sync    Sync observed code changes back into the semantic map via LLM
   check   Fail if the semantic map is missing or older than source files
   version Print version and exit
 
@@ -271,10 +275,10 @@ User guide:
   Need to execute a plan     codetalker exec
   Need parallel execution    codetalker exec --parallel 8
   Need to sync after edits    codetalker sync
-  Need sync progress          codetalker sync --stream
-  Need semantic sync          codetalker sync --llm --stream
   Need CI freshness checks    codetalker check
   Need version info           codetalker version
+
+Tip: Run any command with --help to see this guide (e.g. "codetalker scan --help").
 
 The map is not just documentation. It is the shared semantic contract an
 AI agent should read before editing and update after changing code.`);
@@ -325,9 +329,6 @@ function initMap(options) {
     console.log(`Created semantic map: ${relative(options.cwd, target)}`);
 }
 async function scanRepo(options) {
-    if (!options.llm) {
-        fail("scan without --llm is no longer supported. Use \"codetalker scan --llm\" for LLM-based architecture analysis.");
-    }
     const report = buildScanReport(options);
     if (options.json) {
         console.log(JSON.stringify(report, null, 2));
@@ -361,10 +362,8 @@ async function syncMap(options) {
     streamProgress(options, "Refreshing Change Sync section.");
     const current = readFileSync(target, "utf8");
     let next = replaceSection(current, "## Change Sync", buildChangeSync(changedFiles));
-    if (options.llm) {
-        streamProgress(options, "Running LLM semantic sync over changed files.");
-        next = await runSemanticSync(options, next, changedFiles);
-    }
+    streamProgress(options, "Running LLM semantic sync over changed files.");
+    next = await runSemanticSync(options, next, changedFiles);
     streamProgress(options, "Writing semantic map.");
     writeFileSync(target, next, "utf8");
     console.log(`Synced semantic map: ${relative(options.cwd, target)}`);
@@ -372,17 +371,34 @@ async function syncMap(options) {
 async function askCodebase(options) {
     const question = requireMessage(options, "Ask requires a question. Example: codetalker ask \"How does auth work?\"");
     const prompt = buildAgentPrompt(options, "Answer the user's codebase question with concrete references and call out uncertainty.", question);
-    await runPrompt(options, prompt);
+    const panel = new MissionPanel();
+    panel.add("ask", "Preparing question context...");
+    if (options.stream) {
+        await runPrompt(options, prompt);
+        panel.done("ask", "Response streamed");
+    }
+    else {
+        const answer = await callChatCompletion(options, prompt, panel, "ask");
+        panel.done("ask", `Complete (${answer.length} chars)`);
+        panel.finish();
+        console.log(answer);
+    }
 }
 async function planChange(options) {
     const request = requireMessage(options, "Plan requires a change request. Example: codetalker plan \"Add magic-link login\"");
     const prompt = buildAgentPrompt(options, "Create a safe implementation plan. Do not modify files. Include affected files, semantic-map updates, risks, and verification steps.", request);
-    const plan = await runPromptCapture(options, prompt);
+    const panel = new MissionPanel();
+    panel.add("plan", "Generating implementation plan...");
+    const plan = await runPromptCapture(options, prompt, panel, "plan");
     if (options.write) {
         writePlan(options, plan);
+        panel.done("plan", `Plan written to ${options.outPath}`);
+        panel.finish();
         console.log(`Wrote plan: ${normalizePath(relative(options.cwd, resolve(options.cwd, options.outPath)))}`);
         return;
     }
+    panel.done("plan", `Complete (${plan.length} chars)`);
+    panel.finish();
     if (!options.stream) {
         console.log(plan);
     }
@@ -805,15 +821,15 @@ async function runArchitectureScan(options, report) {
     const existingMap = existsSync(resolve(options.cwd, options.mapPath))
         ? readFileSync(resolve(options.cwd, options.mapPath), "utf8")
         : buildTemplate();
-    panel.add("coordinator", "Building inspection plan...");
+    panel.add("coordinator", "Building file inspection plan (coordinator)...");
     const inspectionPlan = await buildInspectionPlan(options, report, existingMap, panel);
     panel.done("coordinator", "Inspection plan ready");
     const chunks = splitFilesForAgents(report.files, options.parallel);
     for (let i = 0; i < chunks.length; i++) {
-        panel.add(`reviewer ${i + 1}`, "Queued...");
+        panel.add(`reviewer ${i + 1}`, "Waiting to inspect files...");
     }
     const reviews = await runReviewerAgents(options, chunks, inspectionPlan, panel);
-    panel.add("merger", "Merging review results...");
+    panel.add("merger", "Merging all reviewer outputs into semantic map...");
     const prompt = `You are Codetalker running an architecture scan.
 
 Goal:
@@ -1017,7 +1033,7 @@ async function callChatCompletion(options, prompt, panel, agentId) {
     const config = readConfig(options);
     const endpoint = `${trimTrailingSlash(config.apiUrl)}/chat/completions`;
     const progress = panel && agentId
-        ? makePanelProgress(panel, agentId)
+        ? makePanelProgress(panel, agentId, `Calling ${config.model}`)
         : startModelProgress(config.model, endpoint);
     try {
         const response = await fetch(endpoint, {
@@ -1070,14 +1086,15 @@ function showTokenUsage(usage) {
     const totalPart = `${usage.total_tokens}`;
     process.stderr.write(`[tokens] Input: ${promptPart}${cachePart}, Output: ${outputPart}, Total: ${totalPart}\n`);
 }
-function makePanelProgress(panel, agentId) {
+function makePanelProgress(panel, agentId, taskLabel = "Processing") {
     let active = true;
     let tick = 0;
+    panel.update(agentId, `${taskLabel} (sending request...)`);
     const timer = setInterval(() => {
         if (!active)
             return;
         tick += 1;
-        panel.update(agentId, `Waiting for response (${tick * 5}s elapsed)...`);
+        panel.update(agentId, `${taskLabel} (${tick * 5}s elapsed...)`);
     }, 5000);
     return (message) => {
         if (message) {
@@ -1238,7 +1255,7 @@ async function execution(options) {
     // Read current map for context
     const mapPathResolved = resolve(options.cwd, options.mapPath);
     const currentMap = existsSync(mapPathResolved) ? readFileSync(mapPathResolved, "utf8") : "(no map)";
-    panel.add("coordinator", "Analyzing plan and identifying files to change...");
+    panel.add("coordinator", "Analyzing plan to identify files and change specs...");
     // Phase 1: Coordinator extracts affected files and change specs
     const coordinatorPrompt = createExecCoordPrompt(plan, currentMap, options);
     const coordinatorResult = await callChatCompletion(options, coordinatorPrompt, panel, "coordinator");
@@ -1249,14 +1266,14 @@ async function execution(options) {
     panel.done("coordinator", `Identified ${fileSpecs.length} file${fileSpecs.length === 1 ? "" : "s"} to edit`);
     // Phase 2: For each file, generate new content in parallel
     for (let i = 0; i < fileSpecs.length; i++) {
-        panel.add(`editor ${i + 1}`, `Queued: ${fileSpecs[i].filePath}`);
+        panel.add(`editor ${i + 1}`, `Waiting: ${fileSpecs[i].filePath}`);
     }
     const tasks = fileSpecs.map((spec, index) => async () => {
         const agentId = `editor ${index + 1}`;
         panel.update(agentId, `Reading ${spec.filePath}...`);
         const filePath = resolve(options.cwd, spec.filePath);
         const fileContent = existsSync(filePath) ? readFileSync(filePath, "utf8") : "(new file)";
-        panel.update(agentId, `Generating changes for ${spec.filePath}...`);
+        panel.update(agentId, `Asking LLM to generate new code for ${spec.filePath}...`);
         const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan);
         const newContent = await callChatCompletion(options, editorPrompt, panel, agentId);
         return {

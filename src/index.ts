@@ -13,7 +13,6 @@ type CliOptions = {
   planPath: string;
   json: boolean;
   stream: boolean;
-  llm: boolean;
   write: boolean;
   parallel: number;
   apiUrl?: string;
@@ -143,11 +142,12 @@ const COMMANDS = [
   { command: "codetalker help", purpose: "Show commands and user workflow." },
   { command: "codetalker init", purpose: "Create a semantic map template." },
   { command: "codetalker config", purpose: "Manually configure API URL, API key, and model." },
-  { command: "codetalker scan [--llm] [--write] [--stream] [--parallel 4]", purpose: "Inspect locally or ask parallel LLM reviewers to produce architecture semantics." },
+  { command: "codetalker scan [--write] [--stream] [--parallel 4]", purpose: "Use parallel LLM reviewers to produce architecture semantics." },
   { command: "codetalker map", purpose: "Generate a baseline semantic map from repository structure." },
   { command: "codetalker ask \"message\" [--stream]", purpose: "Answer codebase questions from map and scan context." },
   { command: "codetalker plan \"request\" [--stream] [--write] [--out CODEPLAN.md]", purpose: "Generate a safe implementation plan without editing files." },
-  { command: "codetalker sync [--llm] [--stream]", purpose: "Refresh the semantic map change-sync section, optionally with LLM semantic updates." },
+  { command: "codetalker exec [--plan CODEPLAN.md] [--parallel 4] [--stream]", purpose: "Execute a CODEPLAN.md: apply all file changes in parallel via LLM." },
+  { command: "codetalker sync [--stream]", purpose: "Refresh the semantic map change-sync section with LLM semantic updates." },
   { command: "codetalker check", purpose: "Fail when the semantic map is missing or stale." }
 ];
 const SOURCE_EXTENSIONS = new Map<string, string>([
@@ -187,13 +187,16 @@ const IGNORED_DIRS = new Set([
 ]);
 
 async function main(): Promise<void> {
-  const [command = "help", ...args] = process.argv.slice(2);
-  const options = parseOptions(args);
+  const rawArgs = process.argv.slice(2);
+  const [command = "help", ...rest] = rawArgs;
 
-  if (command === "help" || command === "--help" || command === "-h") {
+  // --help / -h on any subcommand prints the full help
+  if (command === "help" || command === "--help" || command === "-h" || rest.includes("--help") || rest.includes("-h")) {
     printHelp();
     return;
   }
+
+  const options = parseOptions(rest);
 
   if (command === "version" || command === "--version" || command === "-V") {
     printVersion();
@@ -255,7 +258,6 @@ function parseOptions(args: string[]): CliOptions {
   let planPath = DEFAULT_PLAN_PATH;
   let json = false;
   let stream = false;
-  let llm = false;
   let write = false;
   let parallel = 4;
   let apiUrl: string | undefined;
@@ -296,11 +298,6 @@ function parseOptions(args: string[]): CliOptions {
       continue;
     }
 
-    if (arg === "--llm") {
-      llm = true;
-      continue;
-    }
-
     if (arg === "--write") {
       write = true;
       continue;
@@ -329,7 +326,7 @@ function parseOptions(args: string[]): CliOptions {
     operands.push(arg);
   }
 
-  return { cwd, mapPath, outPath, planPath, json, stream, llm, write, parallel: normalizeParallel(parallel), apiUrl, apiKey, model, message: operands.join(" ").trim() };
+  return { cwd, mapPath, outPath, planPath, json, stream, write, parallel: normalizeParallel(parallel), apiUrl, apiKey, model, message: operands.join(" ").trim() };
 }
 
 function printVersion(): void {
@@ -344,24 +341,24 @@ Usage:
   codetalker config
   codetalker config set --api-url URL --api-key KEY [--model MODEL]
   codetalker config show
-  codetalker scan [--write] [--stream] [--parallel 4]
+  codetalker scan [--write] [--json] [--stream] [--parallel 4]
   codetalker map [--map CODEMAP.md]
   codetalker ask "How does auth work?" [--stream]
   codetalker plan "Add magic-link login" [--stream] [--write] [--out CODEPLAN.md]
   codetalker exec [--plan CODEPLAN.md] [--parallel 4] [--stream]
-  codetalker sync [--map CODEMAP.md] [--llm] [--stream]
+  codetalker sync [--map CODEMAP.md] [--stream]
   codetalker check [--map CODEMAP.md]
   codetalker version
 
 Commands:
   init    Create a semantic map template if one does not exist
   config  Manually enter and store API URL, API key, and model
-  scan    Run parallel LLM reviewers to produce architecture semantics (--llm is implied)
+  scan    Run parallel LLM reviewers to produce architecture semantics
   map     Generate a baseline semantic map from the current repo shape
-  ask     Ask a codebase question using the semantic map as context
-  plan    Generate an implementation plan; with --write, save it to disk
+  ask     Ask a codebase question using LLM
+  plan    Generate an implementation plan using LLM; with --write, save to disk
   exec    Execute a CODEPLAN.md: apply all file changes in parallel via LLM
-  sync    Sync observed code changes back into the semantic map; does not execute plans
+  sync    Sync observed code changes back into the semantic map via LLM
   check   Fail if the semantic map is missing or older than source files
   version Print version and exit
 
@@ -380,10 +377,10 @@ User guide:
   Need to execute a plan     codetalker exec
   Need parallel execution    codetalker exec --parallel 8
   Need to sync after edits    codetalker sync
-  Need sync progress          codetalker sync --stream
-  Need semantic sync          codetalker sync --llm --stream
   Need CI freshness checks    codetalker check
   Need version info           codetalker version
+
+Tip: Run any command with --help to see this guide (e.g. "codetalker scan --help").
 
 The map is not just documentation. It is the shared semantic contract an
 AI agent should read before editing and update after changing code.`);
@@ -441,10 +438,6 @@ function initMap(options: CliOptions): void {
 }
 
 async function scanRepo(options: CliOptions): Promise<void> {
-  if (!options.llm) {
-    fail("scan without --llm is no longer supported. Use \"codetalker scan --llm\" for LLM-based architecture analysis.");
-  }
-
   const report = buildScanReport(options);
 
   if (options.json) {
@@ -488,10 +481,8 @@ async function syncMap(options: CliOptions): Promise<void> {
   const current = readFileSync(target, "utf8");
   let next = replaceSection(current, "## Change Sync", buildChangeSync(changedFiles));
 
-  if (options.llm) {
-    streamProgress(options, "Running LLM semantic sync over changed files.");
-    next = await runSemanticSync(options, next, changedFiles);
-  }
+  streamProgress(options, "Running LLM semantic sync over changed files.");
+  next = await runSemanticSync(options, next, changedFiles);
 
   streamProgress(options, "Writing semantic map.");
   writeFileSync(target, next, "utf8");
