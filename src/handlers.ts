@@ -7,7 +7,8 @@ import { createInterface } from "node:readline/promises";
 
 import type { CliOptions, CodetalkerConfig, ScanReport, SourceFile } from "./types.js";
 import { MissionPanel } from "./panel.js";
-import { callChatCompletion, runPrompt, runPromptCapture } from "./api.js";
+import { callChatCompletion, callWithTools, runPrompt, runPromptCapture } from "./api.js";
+import { ALL_TOOLS } from "./tools.js";
 import {
   buildMap,
   buildTemplate,
@@ -512,30 +513,25 @@ export async function syncMap(options: CliOptions): Promise<void> {
 
 export async function askCodebase(options: CliOptions): Promise<void> {
   const question = requireMessage(options, "Ask requires a question. Example: codetalk ask \"How does auth work?\"");
-  const prompt = buildAgentPrompt(options, `You are analyzing a codebase to answer a developer's question.
 
-Think step by step:
-1. First read the semantic contract to understand the overall architecture, modules, and key functions.
-2. Identify which modules, files, and functions are most relevant to the question.
-3. Trace the complete code path through those relevant files — follow function calls, data flow, and state changes.
-4. Synthesize your findings into a clear answer with concrete file:line references.
+  const map = readMapForContext(options);
+  const systemPrompt = `You are analyzing a codebase. Use the tools to explore files when you need specific information.
 
-Requirements:
-- Start with a brief summary of the relevant architecture.
-- Reference specific files, functions, and line numbers wherever applicable.
-- Distinguish observed behavior from inference. If a code path is unclear, say so.
-- If the question involves data flow, trace it from input to output.
-- If there are edge cases, call them out.`, question);
+Semantic contract path: ${options.mapPath}
+
+Semantic contract:
+${map}`;
 
   const panel = new MissionPanel();
-  panel.add("ask", "Preparing question context...");
+  panel.add("ask", "Exploring codebase with tools...");
 
   if (options.stream) {
-    await runPrompt(options, prompt);
+    const answer = await callWithTools(options, systemPrompt, question, ALL_TOOLS, panel, "ask");
     panel.done("ask", "Response streamed");
+    console.log(answer);
   } else {
-    const { content: answer, tokenStr: askTokens } = await callChatCompletion(options, prompt, panel, "ask", "Answering question");
-    panel.done("ask", `Complete (${answer.length} chars)${askTokens}`);
+    const answer = await callWithTools(options, systemPrompt, question, ALL_TOOLS, panel, "ask");
+    panel.done("ask", `Complete (${answer.length} chars)`);
     panel.finish();
     console.log(answer);
   }
@@ -545,34 +541,17 @@ Requirements:
 
 export async function planChange(options: CliOptions): Promise<void> {
   const request = requireMessage(options, "Plan requires a change request. Example: codetalk plan \"Add magic-link login\"");
-  const prompt = buildAgentPrompt(
-    options,
-    `You are creating a safe, reviewable implementation plan for a code change.
 
-Think step by step:
-1. First read the semantic contract to understand the relevant architecture, modules, and functions.
-2. Analyze the existing code paths that will be affected — follow data flow, state changes, and dependencies.
-3. Design the implementation approach:
-   a. Which files need to be created, modified, or deleted
-   b. What each file's new behavior should be
-   c. How the change affects existing contracts (APIs, data formats, side effects)
-4. Identify risks, edge cases, and backward-compatibility concerns.
-5. Define verification steps.
+  const map = readMapForContext(options);
+  const systemPrompt = `You are creating a safe implementation plan. Use the tools to explore the codebase.
 
-Requirements:
-- List every affected file with a clear description of what changes.
-- Include the semantic-map sections that must be updated after implementation.
-- For each risk, describe both the risk and a specific mitigation.
-- Prefer minimal, focused changes over large refactors.
-- Do NOT modify any files — produce a plan only.
-- Use this structure: Goal, Affected Files, Specific Code Changes, Semantic Map Updates, Risks, Implementation Order.`,
-    request
-  );
+Semantic contract:
+${map}`;
 
   const panel = new MissionPanel();
-  panel.add("plan", "Generating implementation plan...");
+  panel.add("plan", "Exploring codebase with tools...");
 
-  const plan = await runPromptCapture(options, prompt, panel, "plan", "Generating plan");
+  const plan = await callWithTools(options, systemPrompt, request, ALL_TOOLS, panel, "plan");
 
   writePlan(options, plan);
   panel.done("plan", `Plan written to ${options.outPath}`);

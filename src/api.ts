@@ -1,6 +1,8 @@
 import type { CliOptions, TokenUsage } from "./types.js";
 import { MissionPanel } from "./panel.js";
 import { trimTrailingSlash, fail, readConfig } from "./utils.js";
+import type { ToolDef, ToolResult } from "./tools.js";
+import { executeTool } from "./tools.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 180_000;
 
@@ -260,6 +262,171 @@ export function startModelProgress(model: string, endpoint: string): (message: s
 }
 
 // ── Run helpers ──────────────────────────────────────────────────────────────
+
+// ── Chat completion messages (full messages array) ────────────────────────────
+
+export async function callChatCompletionMessages(
+  options: CliOptions,
+  messages: Array<{ role: string; content: string }>,
+  panel?: MissionPanel,
+  agentId?: string,
+  detail?: string
+): Promise<{ content: string; tokenStr: string }> {
+  const config = readConfig(options);
+  const endpoint = `${trimTrailingSlash(config.apiUrl)}/chat/completions`;
+  const progress = panel && agentId
+    ? makePanelProgress(panel, agentId, `Calling ${config.model}`, detail)
+    : startModelProgress(config.model, endpoint);
+  const timeoutMs = readRequestTimeoutMs();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "authorization": `Bearer ${config.apiKey}`
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: config.model,
+        messages,
+        temperature: 0.2
+      })
+    }).catch((error: unknown) => {
+      fail(formatRequestFailure(error, endpoint, timeoutMs));
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      fail(`API request failed: ${response.status} ${response.statusText}\n${errorText}`);
+    }
+
+    progress("Reading model response.");
+    const payload = await response.json().catch((error: unknown) => {
+      fail(formatRequestFailure(error, endpoint, timeoutMs));
+    }) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: TokenUsage;
+    };
+    const content = payload.choices?.[0]?.message?.content;
+    if (!content) {
+      fail("API response did not include choices[0].message.content.");
+    }
+
+    progress("Model response received.");
+    return { content: content!, tokenStr: formatTokenUsage(payload.usage) };
+  } finally {
+    clearTimeout(timeout);
+    progress(undefined);
+  }
+}
+
+// ── Tool-calling loop ─────────────────────────────────────────────────────────
+
+const DEFAULT_MAX_TOOL_TURNS = 15;
+
+/**
+ * Detect a structured tool call in the LLM response.
+ * The LLM outputs JSON like `{"_tool": "toolName", "args": {...}}` on its own line.
+ */
+export function parseToolCall(content: string): { toolName: string; args: Record<string, any> } | null {
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("{") && trimmed.includes("\"_tool\"")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed._tool && typeof parsed._tool === "string") {
+          return { toolName: parsed._tool, args: parsed.args ?? {} };
+        }
+      } catch {
+        // Not valid JSON, skip this line
+      }
+    }
+  }
+  return null;
+}
+
+/** Build a tool-definition block for the system prompt. */
+export function buildToolDefinitions(tools: ToolDef[]): string {
+  const lines: string[] = [];
+  lines.push("<tools>");
+  lines.push("Available tools. When you need to explore the codebase, output ONLY a JSON tool call:");
+  lines.push('{"_tool": "name", "args": {...}}');
+  lines.push("");
+
+  for (const tool of tools) {
+    lines.push(`Tool: ${tool.name}`);
+    lines.push(`  Description: ${tool.description}`);
+    if (tool.args.length > 0) {
+      lines.push("  Args:");
+      for (const arg of tool.args) {
+        const required = arg.required ? " (required)" : "";
+        lines.push(`    ${arg.name} (${arg.type}): ${arg.description}${required}`);
+      }
+    }
+    lines.push("");
+  }
+
+  lines.push("After you receive the tool result, continue your analysis. If you need more info, call another tool.");
+  lines.push("When you have enough information to answer, provide your response in plain text (no JSON tool call).");
+  lines.push("</tools>");
+
+  return lines.join("\n");
+}
+
+export async function callWithTools(
+  options: CliOptions,
+  systemPrompt: string,
+  userMessage: string,
+  tools: ToolDef[],
+  panel?: MissionPanel,
+  agentId?: string,
+  maxTurns: number = DEFAULT_MAX_TOOL_TURNS
+): Promise<string> {
+  const toolDefBlock = buildToolDefinitions(tools);
+  const messages: Array<{ role: string; content: string }> = [
+    { role: "system", content: `${systemPrompt}\n\n${toolDefBlock}` },
+    { role: "user", content: userMessage }
+  ];
+
+  const progress = panel && agentId
+    ? makePanelProgress(panel, agentId, `Calling ${readConfig(options).model}`, "with tools")
+    : startModelProgress(readConfig(options).model, "tool-calling");
+
+  for (let turn = 0; turn < maxTurns; turn++) {
+    const detailStr = `Tool turn ${turn + 1}/${maxTurns}`;
+    progress(detailStr);
+
+    const { content } = await callChatCompletionMessages(options, messages, panel, agentId, detailStr);
+
+    const toolCall = parseToolCall(content);
+    if (!toolCall) {
+      progress(undefined);
+      return content;
+    }
+
+    const result = executeTool(toolCall.toolName, toolCall.args, options.cwd);
+    const resultXml = result.success
+      ? `<tool_result>\n${result.data}\n</tool_result>`
+      : `<tool_result error="true">\n${result.data}\n</tool_result>`;
+
+    messages.push({ role: "assistant", content });
+    messages.push({ role: "user", content: resultXml });
+  }
+
+  progress(undefined);
+
+  // Max turns reached — do one final call without tool preamble to get a plain answer
+  const finalSystem = `${systemPrompt}\n\nYou have reached the maximum number of tool calls. Please provide your best answer based on what you've learned so far.`;
+  const finalMessages: Array<{ role: string; content: string }> = [
+    { role: "system", content: finalSystem },
+    ...messages.slice(1)
+  ];
+  const { content: finalContent } = await callChatCompletionMessages(options, finalMessages, panel, agentId, "Final answer (max turns reached)");
+  return finalContent;
+}
 
 export async function runPrompt(options: CliOptions, prompt: string): Promise<void> {
   const answer = await runPromptCapture(options, prompt);
