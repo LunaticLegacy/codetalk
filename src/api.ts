@@ -332,19 +332,30 @@ const DEFAULT_MAX_TOOL_TURNS = 15;
  * The LLM outputs JSON like `{"_tool": "toolName", "args": {...}}` on its own line.
  */
 export function parseToolCall(content: string): { toolName: string; args: Record<string, any> } | null {
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("{") && trimmed.includes("\"_tool\"")) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed._tool && typeof parsed._tool === "string") {
-          return { toolName: parsed._tool, args: parsed.args ?? {} };
-        }
-      } catch {
-        // Not valid JSON, skip this line
-      }
+  // Find JSON containing "_tool" anywhere in content (LLM may wrap in HTML/XML tags)
+  const marker = '{"_tool"';
+  const startIdx = content.indexOf(marker);
+  if (startIdx < 0) return null;
+
+  const jsonPart = content.slice(startIdx);
+  let depth = 0;
+  let endIdx = -1;
+  for (let i = 0; i < jsonPart.length; i++) {
+    if (jsonPart[i] === "{") depth++;
+    if (jsonPart[i] === "}") {
+      depth--;
+      if (depth === 0) { endIdx = i + 1; break; }
     }
   }
+  if (endIdx < 0) return null;
+
+  try {
+    const parsed = JSON.parse(jsonPart.slice(0, endIdx));
+    if (parsed._tool && typeof parsed._tool === "string") {
+      return { toolName: parsed._tool, args: parsed.args ?? {} };
+    }
+  } catch {}
+
   return null;
 }
 

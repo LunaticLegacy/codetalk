@@ -1260,7 +1260,10 @@ export function parseExecChangeSpecs(coordinatorOutput: string): Array<{ filePat
       if (currentPath && currentDesc) {
         specs.push({ filePath: currentPath, description: currentDesc });
       }
-      currentPath = fileMatch[1].trim();
+      let raw = fileMatch[1].trim();
+      // Strip LLM annotations like (new), (modified), (create), etc. from file paths
+      raw = raw.replace(/\s*\([^)]*\)\s*$/, "").trim();
+      currentPath = raw;
       currentDesc = "";
     } else if (changeMatch) {
       currentDesc = changeMatch[1].trim();
@@ -1277,7 +1280,7 @@ export function parseExecChangeSpecs(coordinatorOutput: string): Array<{ filePat
     // Try to extract from markdown: ### filename sections
     const mdFiles = coordinatorOutput.matchAll(/^#{1,3}\s+([^\n]+)\n([\s\S]*?)(?=\n#{1,3}\s|$)/gm);
     for (const match of mdFiles) {
-      const path = match[1].trim().replace(/^`|`$/g, "").trim();
+      const path = match[1].trim().replace(/^`|`$/g, "").replace(/\s*\([^)]*\)\s*$/, "").trim();
       const desc = match[2].trim();
       if (path && desc) {
         specs.push({ filePath: path, description: desc });
