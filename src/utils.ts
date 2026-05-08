@@ -45,7 +45,7 @@ export function collectSourceFiles(root: string): SourceFile[] {
         ".ttf", ".otf", ".woff", ".woff2", ".eot",
         ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar",
         ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-        ".pyc", ".pyo", ".class", ".jar", ".war",
+        ".pyc", ".pyo", ".class", ".jar", ".war", ".elf",
         ".DS_Store", ".gitkeep"]);
       const ext = getExtension(entry.name);
       if (denied.has(ext)) {

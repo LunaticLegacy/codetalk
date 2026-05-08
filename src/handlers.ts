@@ -898,15 +898,18 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
   panel.add("merger", "Reading index and synthesizing semantic map...");
 
   // Use symbol index (compact, structured) instead of full per-file analyses
-  const index = loadIndex(options.cwd);
-  const indexBlock = index
-    ? Object.entries(index.files).map(([path, info]) =>
+  let indexBlock = "(no index available)";
+  try {
+    const index = loadIndex(options.cwd);
+    if (index) {
+      indexBlock = Object.entries(index.files).map(([path, info]) =>
         `- ${path} (${info.language}, ${info.size}b)` +
-        (info.functions.length ? ` funcs: ${info.functions.join(", ")}` : "") +
-        (info.types.length ? ` types: ${info.types.join(", ")}` : "") +
-        (info.imports.length ? ` imports: ${info.imports.join(", ")}` : "")
-      ).join("\n")
-    : "(no index available)";
+        (info.functions?.length ? ` funcs: ${info.functions.join(", ")}` : "") +
+        (info.types?.length ? ` types: ${info.types.join(", ")}` : "") +
+        (info.imports?.length ? ` imports: ${info.imports.join(", ")}` : "")
+      ).join("\n");
+    }
+  } catch {}
 
   const prompt = mergerPrompt(existingMap, formatScan(report), inspectionPlan, indexBlock, options.mapPath);
 
