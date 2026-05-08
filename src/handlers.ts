@@ -272,16 +272,18 @@ export async function execution(options: CliOptions): Promise<void> {
     panel.add(`editor ${i + 1}`, `Waiting: ${fileSpecs[i].filePath}`);
   }
 
+  const totalFiles = fileSpecs.length;
   const tasks = fileSpecs.map((spec, index) => async () => {
     const agentId = `editor ${index + 1}`;
-    panel.update(agentId, `Reading ${spec.filePath}...`);
+    const fileNum = `${index + 1}/${totalFiles}`;
+    panel.update(agentId, `Reading file ${fileNum}: ${spec.filePath}...`);
 
     const filePath = resolve(options.cwd, spec.filePath);
     const fileContent = existsSync(filePath) ? readFileSync(filePath, "utf8") : "(new file)";
 
-    panel.update(agentId, `Asking LLM to generate new code for ${spec.filePath}...`);
+    panel.update(agentId, `Asking LLM for file ${fileNum}: ${spec.filePath}...`);
     const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan, currentMap);
-    const editDetail = existsSync(filePath) ? `Writing ${spec.filePath}` : `Creating ${spec.filePath}`;
+    const editDetail = `File ${fileNum}: ${spec.filePath}`;
     let newContent = await callChatCompletion(options, editorPrompt, panel, agentId, editDetail);
     newContent = stripCodeFence(newContent);
 
@@ -296,10 +298,11 @@ export async function execution(options: CliOptions): Promise<void> {
   const results = await runLimited(tasks, options.parallel);
 
   // Phase 3: Apply all changes — show each file as it's written
+  const totalApply = results.length;
   panel.add("apply", "Writing changes to disk...");
   let changedCount = 0;
   for (const result of results) {
-    panel.update("apply", `Writing ${result.filePath}...`);
+    panel.update("apply", `Writing file ${changedCount + 1}/${totalApply}: ${result.filePath}...`);
     const target = resolve(options.cwd, result.filePath);
     ensureParentDirectory(target);
     writeFileSync(target, result.newContent, "utf8");
@@ -430,8 +433,9 @@ export async function runReviewerAgents(options: CliOptions, chunks: SourceFile[
 
     for (let fi = 0; fi < chunk.length; fi++) {
       const file = chunk[fi];
+      const fileNum = `${fi + 1}/${chunk.length}`;
 
-      panel?.update(agentId, `Reading ${file.path}...`);
+      panel?.update(agentId, `Reading file ${fileNum}: ${file.path}...`);
 
       const fullPath = resolve(options.cwd, file.path);
       const content = existsSync(fullPath)
@@ -456,7 +460,7 @@ File: ${file.path} (${file.language}, ${file.bytes} bytes)
 
 \`\`\`\n${content}\n\`\`\``;
 
-      const analysis = await callChatCompletion(options, prompt, panel, agentId, `Reading ${file.path}`);
+      const analysis = await callChatCompletion(options, prompt, panel, agentId, `File ${fileNum}: ${file.path}`);
 
       const tmpPath = join(tmpDir, `reviewer-${index + 1}-file-${fi}-${sanitizePath(file.path)}.md`);
       writeFileSync(tmpPath, analysis, "utf8");
