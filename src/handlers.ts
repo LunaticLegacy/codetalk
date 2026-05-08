@@ -888,28 +888,20 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
   const { content: inspectionPlan, tokenStr: coordTokens } = await buildInspectionPlan(options, report, existingMap, panel);
   panel.done("coordinator", `Inspection plan ready${coordTokens}`);
 
-  const chunks = splitFilesForAgents(report.files, options.parallel);
-  for (let i = 0; i < chunks.length; i++) {
-    panel.add(`reviewer ${i + 1}`, "Waiting to inspect files...");
-  }
-
-  const { tmpDir, analysisFiles } = await runReviewerAgents(options, chunks, inspectionPlan, panel);
+  panel.add("indexer", "Extracting symbols via AST...");
+  const astIndex = buildSymbolIndex(options.cwd);
+  saveIndex(options.cwd, astIndex);
+  panel.done("indexer", `Indexed ${Object.keys(astIndex.files).length} files`);
 
   panel.add("merger", "Reading index and synthesizing semantic map...");
 
-  // Use symbol index (compact, structured) instead of full per-file analyses
-  let indexBlock = "(no index available)";
-  try {
-    const index = loadIndex(options.cwd);
-    if (index) {
-      indexBlock = Object.entries(index.files).map(([path, info]) =>
-        `- ${path} (${info.language}, ${info.size}b)` +
-        (info.functions?.length ? ` funcs: ${info.functions.join(", ")}` : "") +
-        (info.types?.length ? ` types: ${info.types.join(", ")}` : "") +
-        (info.imports?.length ? ` imports: ${info.imports.join(", ")}` : "")
-      ).join("\n");
-    }
-  } catch {}
+  // Build compact index block from fresh AST data
+  const indexBlock = Object.entries(astIndex.files).map(([path, info]) =>
+    `- ${path} (${info.language}, ${info.size}b)` +
+    (info.functions?.length ? ` funcs: ${info.functions.join(", ")}` : "") +
+    (info.types?.length ? ` types: ${info.types.join(", ")}` : "") +
+    (info.imports?.length ? ` imports: ${info.imports.join(", ")}` : "")
+  ).join("\n");
 
   const depth = options.depth || "medium";
 
@@ -942,9 +934,6 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
   }
 
   panel.finish();
-
-  // Clean up temp directory
-  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ok */ }
 
   return result;
 }
