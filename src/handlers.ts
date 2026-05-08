@@ -911,7 +911,7 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
     }
   } catch {}
 
-  const prompt = mergerPrompt(existingMap, formatScan(report), inspectionPlan, indexBlock, options.mapPath);
+  const prompt = mergerPrompt(existingMap, formatScan(report), inspectionPlan, indexBlock, options.mapPath, options.depth || "medium");
 
   const { content: mapResult, tokenStr: mergerTokens } = await callChatCompletion(options, prompt, panel, "merger", "Synthesizing map");
   const result = sanitizeMarkdownMap(mapResult);

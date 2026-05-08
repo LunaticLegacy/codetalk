@@ -497,15 +497,36 @@ export function mergerPrompt(
   reportSummary: string,
   inspectionPlan: string,
   perFileAnalyses: string,
-  mapPath: string
+  mapPath: string,
+  depth: string = "medium"
 ): string {
+  const sections = depth === "full" || depth === "high"
+    ? fullDepthSections()
+    : mediumDepthSections();
+
   return `You are Codetalker — a senior software architect producing a living semantic map.
 
 Goal:
 - Synthesize the per-file analyses below into a complete, accurate semantic map that can be written to ${mapPath}.
 - This is NOT passive documentation. It is the behavioral contract that AI coding agents will read before modifying code. Every detail matters.
 
-Rules:
+${sections}
+
+Existing semantic map:
+${existingMap}
+
+Repository scan:
+${reportSummary}
+
+Coordinator inspection plan:
+${inspectionPlan}
+
+Per-file analyses:
+${perFileAnalyses}`;
+}
+
+function mediumDepthSections(): string {
+  return `Rules:
 - Return markdown only, starting with "# Code Semantic Map".
 - Include these stable sections: Architecture, Modules, Types, Functions, Runtime Flow, Side Effects, Agent Change Protocol, Change Sync.
 
@@ -522,22 +543,64 @@ For each section:
 Quality standards:
 - Be precise about behavior, not just intent.
 - Distinguish observed code behavior from inference when ambiguous.
-- When a file was truncated, explicitly state what remains uncertain.
-- Prefer observed reviewer evidence over inference.
-- Prefer concise bullet lists or tables when they improve scanability.
-- If analyses produced conflicting observations, call out the conflict.
+- Prefer concise bullet lists or tables when they improve scanability.\n\n`;
+}
 
-Existing semantic map:
-${existingMap}
+function fullDepthSections(): string {
+  return `Output the semantic map with these sections:
 
-Repository scan:
-${reportSummary}
+### 1. API Surface
+- CLI commands: list every command, its purpose, flags
+- HTTP/RPC API endpoints (if present): method, path, request/response shape
+- Exported package API: public classes, functions, constants, their signatures
 
-Coordinator inspection plan:
-${inspectionPlan}
+### 2. Classes
+For each class:
+- Class name
+- File path
+- Constructor: parameters, what it initializes
+- Stored fields / instance state: field name, type, initial value
+- Static fields: field name, type, purpose
+- Invariants: conditions that must always hold
+- Lifecycle: creation → usage → destruction
 
-Per-file analyses:
-${perFileAnalyses}`;
+### 3. Interfaces / Types
+For each interface or type:
+- Name: interface/type name
+- Fields: field names and types
+- Implementers / Users: which classes implement it, which functions consume it
+- Semantic meaning: what this type represents in the domain
+- Constraints: valid value ranges, required conditions
+
+### 4. Functions / Methods
+For each function or method:
+- Full name: Class.method or module.function
+- Visibility / export status: public, private, exported
+- Parameters: name, type, optional/default
+- Return value: type, semantics
+- Side effects: I/O, state mutation, network calls
+- Errors thrown: exception types and conditions
+- Calls out to: dependencies this function invokes
+- Called by: reverse dependency list
+- Semantic role: what this function achieves
+
+### 5. Execution Flows
+Document each major execution path:
+- Startup flow: initialization sequence
+- Command flow: how user commands are dispatched and handled
+- Plan flow: from user request to CODEPLAN.md
+- Exec flow: from plan to file edits
+- Scan flow: from repo to CODEMAP.md
+- Error flow: how errors propagate
+- Rollback flow: how changes are reverted
+
+### 6. Data Flow
+- Data sources: inputs, files, API responses
+- Data transformations: how data changes between modules
+- Data sinks: outputs, files written, database writes
+- Caching: what is cached, cache lifetime, invalidation
+
+Keep the format as markdown with stable headings. Use tables where they improve scanability. Be precise about behavior, not just intent.`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
