@@ -28,10 +28,10 @@ try {
   assertIncludes(shown, "API key: test...cret", "config show masks API key");
 
   const version = run("version");
-  assertIncludes(version, "codetalk-cli v", "version prints version string");
+  assertIncludes(version, "codetalk v", "version prints version string");
 
   const help = run("help");
-  assertIncludes(help, "codetalk-cli v", "help shows version");
+  assertIncludes(help, "codetalk v", "help shows version");
   assertIncludes(help, "exec", "help lists exec command");
 
   run("map");

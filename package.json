@@ -4,6 +4,7 @@
   "description": "Maintain a living semantic map that agents use to understand and safely modify code.",
   "type": "module",
   "bin": {
+    "codetalk": "dist/index.js",
     "codetalk-cli": "dist/index.js"
   },
   "files": [
