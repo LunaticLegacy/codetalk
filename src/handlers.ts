@@ -19,7 +19,10 @@ import {
   mergerPrompt,
   planSystemPrompt,
   retryEditorPrompt,
-  reviewerPrompt,
+  reviewerPromptLow,
+  reviewerPromptMedium,
+  reviewerPromptHigh,
+  reviewerPromptFull,
   semanticSyncPrompt
 } from "./prompts.js";
 import {
@@ -573,6 +576,7 @@ export function checkMap(options: CliOptions): void {
 
   const mapMtime = statSync(target).mtimeMs;
   const staleFiles = collectSourceFiles(options.cwd)
+    .filter((file) => file.language !== "Source")
     .filter((file) => statSync(resolve(options.cwd, file.path)).mtimeMs > mapMtime)
     .map((file) => file.path);
 
@@ -928,6 +932,17 @@ export async function runReviewerAgents(options: CliOptions, chunks: SourceFile[
   const tmpDir = mkdtempSync(join(tmpdir(), "codetalk-scan-"));
   const analysisFiles: string[] = [];
 
+  // Select the reviewer prompt function based on scan depth
+  const promptFn = (file: SourceFile, content: string): string => {
+    switch (options.depth) {
+      case "low": return reviewerPromptLow(file, content);
+      case "high": return reviewerPromptHigh(file, content, inspectionPlan);
+      case "full": return reviewerPromptFull(file, content, inspectionPlan);
+      case "medium":
+      default: return reviewerPromptMedium(file, content, inspectionPlan);
+    }
+  };
+
   const tasks = chunks.map((chunk, index) => async () => {
     const agentId = `reviewer ${index + 1}`;
     const fileAnalysisPaths: string[] = [];
@@ -944,7 +959,7 @@ export async function runReviewerAgents(options: CliOptions, chunks: SourceFile[
         ? readFileSync(fullPath, "utf8").slice(0, 24_000)
         : "(file not found)";
 
-      const prompt = reviewerPrompt(file, content, inspectionPlan);
+      const prompt = promptFn(file, content);
 
       const { content: analysis, tokenStr } = await callChatCompletion(options, prompt, panel, agentId, `File ${fileNum}: ${file.path}`);
       lastTokenStr = tokenStr;

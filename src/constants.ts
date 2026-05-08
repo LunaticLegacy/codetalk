@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { ScanDepth } from "./types.js";
 
 const { version: VERSION } = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
@@ -8,6 +9,15 @@ export const DEFAULT_MAP_PATH = "CODEMAP.md";
 export const DEFAULT_PLAN_PATH = "CODEPLAN.md";
 export const DEFAULT_MODEL = "gpt-4.1";
 export const DEFAULT_API_URL = "https://api.openai.com/v1";
+export const DEFAULT_DEPTH: ScanDepth = "medium";
+export const DEFAULT_TIMEOUT_MS = 180_000;
+
+export const DEPTH_LABELS: Record<ScanDepth, string> = {
+  low: "Basic role identification only",
+  medium: "Exports, imports, function names, and type names",
+  high: "Full semantic: function signatures, class members, interfaces, decorators",
+  full: "Everything in HIGH plus control flow, API interfaces, error handling, async patterns"
+};
 
 export const PROVIDERS = [
   {
@@ -132,12 +142,14 @@ Flags:
     scan: `codetalk scan - Run parallel LLM reviewers to produce architecture semantics
 
 Usage:
-  codetalk scan [--json] [--stream] [--parallel N]
+  codetalk scan [--json] [--stream] [--parallel N] [--depth low|medium|high|full] [--timeout MS]
 
 Flags:
   --json          Output scan report as JSON
   --stream        Stream LLM responses in real time
   --parallel N    Number of parallel reviewer agents (default: 4)
+  --depth LEVEL   Scan depth: low, medium, high, or full (default: medium)
+  --timeout MS    API request timeout in milliseconds (default: 180000)
   --cwd PATH      Working directory
   --api-url URL   LLM API endpoint
   --api-key KEY   LLM API key
@@ -179,11 +191,12 @@ Flags:
     exec: `codetalk exec - Execute a CODEPLAN.md: apply file changes in parallel via LLM
 
 Usage:
-  codetalk exec [--plan FILE] [--parallel N] [--stream]
+  codetalk exec [--plan FILE] [--parallel N] [--stream] [--timeout MS]
 
 Flags:
   --plan FILE     Plan file to execute (default: CODEPLAN.md)
   --parallel N    Number of parallel file editors (default: 4)
+  --timeout MS    API request timeout in milliseconds (default: 180000)
   --stream        Stream LLM responses in real time
   --cwd PATH      Working directory
   --api-url URL   LLM API endpoint
@@ -222,11 +235,11 @@ Usage:
   codetalk config
   codetalk config set --api-url URL --api-key KEY [--model MODEL]
   codetalk config show
-  codetalk scan [--json] [--stream] [--parallel 4]
+  codetalk scan [--json] [--stream] [--parallel 4] [--depth low|medium|high|full] [--timeout MS]
   codetalk map [--map CODEMAP.md]
   codetalk ask "How does auth work?" [--stream]
   codetalk plan "Add magic-link login" [--stream] [--out CODEPLAN.md]
-  codetalk exec [--plan CODEPLAN.md] [--parallel 4] [--stream]
+  codetalk exec [--plan CODEPLAN.md] [--parallel 4] [--stream] [--timeout MS]
   codetalk check [--map CODEMAP.md]
   codetalk rollback [--list | <backup-id>]
   codetalk version

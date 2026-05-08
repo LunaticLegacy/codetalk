@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 
-import type { CliOptions, CodetalkerConfig, ScanReport, SourceFile, SourceSummary } from "./types.js";
-import { DEFAULT_API_URL, DEFAULT_MAP_PATH, DEFAULT_MODEL, DEFAULT_PLAN_PATH, SOURCE_EXTENSIONS, IGNORED_DIRS, COMMANDS } from "./constants.js";
+import type { CliOptions, CodetalkerConfig, ScanDepth, ScanReport, SourceFile, SourceSummary } from "./types.js";
+import { DEFAULT_API_URL, DEFAULT_DEPTH, DEFAULT_MAP_PATH, DEFAULT_MODEL, DEFAULT_PLAN_PATH, DEFAULT_TIMEOUT_MS, SOURCE_EXTENSIONS, IGNORED_DIRS, COMMANDS } from "./constants.js";
 import { loadIndex } from "./indexer.js";
 
 // ── File collection ───────────────────────────────────────────────────────────
@@ -38,11 +38,21 @@ export function collectSourceFiles(root: string): SourceFile[] {
         continue;
       }
 
-      const extension = getExtension(entry.name);
-      const language = SOURCE_EXTENSIONS.get(extension);
-      if (!language) {
+      // Blacklist: skip files with extensions that are clearly non-source
+      const denied = new Set([".exe", ".dll", ".so", ".dylib", ".bin", ".obj", ".o", ".a", ".lib",
+        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg", ".webp", ".avif",
+        ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv", ".flv",
+        ".ttf", ".otf", ".woff", ".woff2", ".eot",
+        ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar",
+        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".pyc", ".pyo", ".class", ".jar", ".war",
+        ".DS_Store", ".gitkeep"]);
+      const ext = getExtension(entry.name);
+      if (denied.has(ext)) {
         continue;
       }
+
+      const language = SOURCE_EXTENSIONS.get(ext) || "Source";
 
       files.push({
         path: normalizePath(relative(root, fullPath)),
@@ -589,6 +599,8 @@ export function parseOptions(args: string[]): CliOptions {
   let stream = false;
   let write = false;
   let parallel = 4;
+  let depth: ScanDepth = DEFAULT_DEPTH;
+  let timeout: number | undefined;
   let apiUrl: string | undefined;
   let apiKey: string | undefined;
   let model: string | undefined;
@@ -637,6 +649,24 @@ export function parseOptions(args: string[]): CliOptions {
       continue;
     }
 
+    if (arg === "--depth") {
+      const raw = (args[++index] ?? "medium").toLowerCase();
+      if (!["low", "medium", "high", "full"].includes(raw)) {
+        fail(`Invalid depth: "${raw}". Use low, medium, high, or full.`);
+      }
+      depth = raw as ScanDepth;
+      continue;
+    }
+
+    if (arg === "--timeout") {
+      const parsed = Number.parseInt(args[++index] ?? String(DEFAULT_TIMEOUT_MS), 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        fail(`Invalid timeout: "${parsed}". Must be a positive number of milliseconds.`);
+      }
+      timeout = parsed;
+      continue;
+    }
+
     if (arg === "--api-url") {
       apiUrl = args[++index];
       continue;
@@ -655,7 +685,7 @@ export function parseOptions(args: string[]): CliOptions {
     operands.push(arg);
   }
 
-  return { cwd, mapPath, outPath, planPath, json, stream, write, parallel: normalizeParallel(parallel), apiUrl, apiKey, model, message: operands.join(" ").trim() };
+  return { cwd, mapPath, outPath, planPath, json, stream, write, parallel: normalizeParallel(parallel), depth, timeout, apiUrl, apiKey, model, message: operands.join(" ").trim() };
 }
 
 // ── Concurrency ───────────────────────────────────────────────────────────────

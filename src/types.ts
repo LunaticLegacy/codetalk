@@ -1,3 +1,5 @@
+export type ScanDepth = "low" | "medium" | "high" | "full";
+
 export type CliOptions = {
   cwd: string;
   mapPath: string;
@@ -7,6 +9,8 @@ export type CliOptions = {
   stream: boolean;
   write: boolean;
   parallel: number;
+  depth: ScanDepth;
+  timeout?: number;
   apiUrl?: string;
   apiKey?: string;
   model?: string;

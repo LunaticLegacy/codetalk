@@ -388,10 +388,30 @@ function reportSummary(report: ScanReport): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// scan  –  Reviewer prompt: analyze a single source file
+// scan  –  Depth-based reviewer prompts: analyze a single source file
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export function reviewerPrompt(
+/** Low depth — just ROLE identification, 1 sentence. */
+export function reviewerPromptLow(
+  file: SourceFile,
+  content: string
+): string {
+  return `You are Codetalker file analyzer.
+
+For this file output:
+ROLE: <one sentence about its role — what this file does within the project>
+
+Keep the ROLE to exactly one sentence. No other output.
+
+File: ${file.path} (${file.language}, ${file.bytes} bytes)
+
+\`\`\`
+${content}
+\`\`\``;
+}
+
+/** Medium depth — current implementation: ROLE, EXPORTS, IMPORTS, FUNCTIONS, TYPES. */
+export function reviewerPromptMedium(
   file: SourceFile,
   content: string,
   inspectionPlan: string
@@ -406,6 +426,60 @@ FUNCTIONS: <comma-separated list of function names with brief purpose in parenth
 TYPES: <comma-separated list of type/class names>
 
 Keep each field concise. No explanations or descriptions beyond what's requested.
+
+File: ${file.path} (${file.language}, ${file.bytes} bytes)
+
+\`\`\`
+${content}
+\`\`\``;
+}
+
+/** High depth — full semantic: function signatures, class members, types/decorators. */
+export function reviewerPromptHigh(
+  file: SourceFile,
+  content: string,
+  inspectionPlan: string
+): string {
+  return `You are Codetalker file analyzer.
+
+For this file output the following fields. Be precise and concise.
+
+ROLE: <one sentence about its role>
+EXPORTS: <comma-separated list of exported symbols>
+IMPORTS: <comma-separated list of import sources>
+FUNCTIONS: <for each exported function: name, argument types, return type>
+CLASSES: <for each class: name, methods (signatures), instance variables, data fields>
+INTERFACES: <for each interface/type-alias: name and key fields (for TS/Java)>
+DECORATORS: <any decorators applied to classes, methods, or fields>
+
+File: ${file.path} (${file.language}, ${file.bytes} bytes)
+
+\`\`\`
+${content}
+\`\`\``;
+}
+
+/** Full depth — everything in HIGH plus control flow, APIs, errors, async. */
+export function reviewerPromptFull(
+  file: SourceFile,
+  content: string,
+  inspectionPlan: string
+): string {
+  return `You are Codetalker file analyzer.
+
+For this file output the following fields. Be precise and concise.
+
+ROLE: <one sentence about its role>
+EXPORTS: <comma-separated list of exported symbols>
+IMPORTS: <comma-separated list of import sources>
+FUNCTIONS: <for each exported function: name, argument types, return type>
+CLASSES: <for each class: name, methods (signatures), instance variables, data fields>
+INTERFACES: <for each interface/type-alias: name and key fields>
+DECORATORS: <any decorators applied to classes, methods, or fields>
+CONTROL_FLOW: <description of the main control flow and branching logic>
+API_INTERFACES: <API endpoint definitions, request/response shapes, HTTP methods>
+ERROR_HANDLING: <error handling patterns: try/catch, error types, fallback logic>
+ASYNC_PATTERNS: <async/await patterns, Promise chains, concurrency handling>
 
 File: ${file.path} (${file.language}, ${file.bytes} bytes)
 

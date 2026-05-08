@@ -15,7 +15,7 @@ export async function callChatCompletion(options: CliOptions, prompt: string, pa
   const progress = panel && agentId
     ? makePanelProgress(panel, agentId, `Calling ${config.model}`, detail)
     : startModelProgress(config.model, endpoint);
-  const timeoutMs = readRequestTimeoutMs();
+  const timeoutMs = readRequestTimeoutMs(options.timeout);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -269,7 +269,7 @@ export async function callChatCompletionMessages(
   const progress = panel && agentId
     ? makePanelProgress(panel, agentId, `Calling ${config.model}`, detail)
     : startModelProgress(config.model, endpoint);
-  const timeoutMs = readRequestTimeoutMs();
+  const timeoutMs = readRequestTimeoutMs(options.timeout);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -443,12 +443,19 @@ export async function runPromptCapture(options: CliOptions, prompt: string, pane
   return (await callChatCompletion(options, prompt, panel, agentId, detail)).content;
 }
 
-function readRequestTimeoutMs(): number {
+function readRequestTimeoutMs(overrideMs?: number): number {
+  // CLI --timeout flag takes highest priority
+  if (overrideMs !== undefined && Number.isFinite(overrideMs) && overrideMs > 0) {
+    return overrideMs;
+  }
+
+  // Then env var
   const parsed = Number.parseInt(process.env.CODETALKER_TIMEOUT_MS ?? "", 10);
   if (Number.isFinite(parsed) && parsed > 0) {
     return parsed;
   }
 
+  // Fallback to default
   return DEFAULT_REQUEST_TIMEOUT_MS;
 }
 
