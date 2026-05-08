@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="codetalk" width="80" />
+</p>
+
 <h2 align="center">codetalk</h2>
 
 <p align="center">

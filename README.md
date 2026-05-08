@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="codetalk" width="80" />
+  <img src="assets/logo.png" alt="codetalk" width="80" />
 </p>
 
 <h2 align="center">codetalk</h2>
