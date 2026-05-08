@@ -351,7 +351,115 @@ export async function execution(options: CliOptions): Promise<void> {
     writeFileSync(target, r.newContent, "utf8");
     changedCount++;
     panel.update("apply", "✓ " + r.filePath);
-  }// Auto-sync semantic map after file changes
+  }
+
+  // Phase 4: Gatekeeper agent — validate program logic, retry if needed
+  const MAX_GATE_RETRIES = 2;
+  let gatePassed = false;
+
+  for (let gateAttempt = 0; gateAttempt <= MAX_GATE_RETRIES; gateAttempt++) {
+    if (gateAttempt > 0) {
+      panel.add("gate", "Re-running program logic validation...");
+    } else {
+      panel.add("gate", "Validating program logic...");
+    }
+
+    const changedContent: Array<{ path: string; content: string }> = [];
+    for (const r of validated) {
+      const target = resolve(options.cwd, r.filePath);
+      if (existsSync(target)) {
+        changedContent.push({ path: r.filePath, content: readFileSync(target, "utf8") });
+      }
+    }
+
+    const gatePrompt = `You are Codetalker gatekeeper. Your job is to validate code changes before they are finalized.
+
+The implementation plan:
+${plan}
+
+Changed files:
+${changedContent.map((f) => `### ${f.path}
+
+\`\`\`
+${f.content}
+\`\`\``).join("\n")}
+
+Check the following:
+1. Import resolution — do all imports reference files/packages that actually exist?
+2. Method/attribute access — do called methods/attributes exist on the target objects/classes?
+3. Consistency — do function signatures match their actual definitions?
+4. Completeness — does the implementation fully satisfy the plan?
+
+If everything passes, return EXACTLY: GATE: PASS
+
+If there are issues, use this format:
+FILE: path
+ISSUE: line number? description
+SUGGESTION: specific fix suggestion
+
+Separate each file's feedback with a blank line.`;
+
+    const { content: gateResult, tokenStr: gateTokens } = await callChatCompletion(options, gatePrompt, panel, "gate", "Checking logic");
+
+    if (gateResult.trim() === "GATE: PASS") {
+      panel.done("gate", "Program logic validated" + gateTokens);
+      gatePassed = true;
+      break;
+    }
+
+    // Gate failed — parse feedback and retry editors
+    const gateFeedback = parseGateFeedback(gateResult);
+    panel.done("gate", "Gate found issues, re-editing..." + gateTokens);
+
+    if (gateAttempt >= MAX_GATE_RETRIES) {
+      panel.add("gate", "Max retries reached, rolling back...");
+      restoreFromBackup(backupDir, options.cwd);
+      panel.done("gate", "Rolled back to original files");
+      panel.finish();
+      console.log("Exec plan FAILED: gate validation failed after max retries.");
+      console.log("All changes have been rolled back.");
+      console.log("\nLast gate feedback:");
+      for (const fb of gateFeedback) {
+        console.log(`  ${fb.file}: ${fb.issue}`);
+      }
+      return;
+    }
+
+    // Re-edit files with gate feedback
+    for (const fb of gateFeedback) {
+      const spec = fileSpecs.find((s) => s.filePath === fb.file);
+      if (!spec) continue;
+
+      const agentId = "editor-retry";
+      panel.update("gate", "Re-editing " + fb.file + "...");
+      const filePath = resolve(options.cwd, fb.file);
+      const fileContent = existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
+      const retryPrompt = `You are Codetalker file editor fixing an issue.
+
+You previously edited this file. The gatekeeper found a problem:
+ISSUE: ${fb.issue}
+SUGGESTION: ${fb.suggestion}
+
+Original change description:
+${spec.description}
+
+Current file content:
+${fileContent}
+
+Return the COMPLETE new file content with the issue fixed. Only the fix, no markdown fences.`;
+
+      const { content: fixedContent } = await callChatCompletion(options, retryPrompt, panel, agentId, "Fixing: " + fb.file);
+      writeFileSync(filePath, stripCodeFence(fixedContent), "utf8");
+      panel.update("gate", "\u2713 " + fb.file);
+    }
+  }
+
+  if (!gatePassed) {
+    // Should not reach here (handled above), but just in case
+    panel.done("gate", "Validation failed, changes may be incomplete");
+  }
+
+  // Auto-sync semantic map after file changes
   panel.add("sync", "Syncing semantic map with code changes...");
   const changedPaths = getChangedFiles(options.cwd);
   if (changedPaths.length > 0) {
@@ -588,6 +696,42 @@ function sanitizePath(p: string): string {
 /** Strip markdown code fences from LLM output that should be raw file content. */
 function stripCodeFence(content: string): string {
   return content.replace(/^```[a-zA-Z]*\n?|[\r\n]```\s*$/g, "").trim();
+}
+
+/** Parse gatekeeper output into structured feedback per file. */
+function parseGateFeedback(output: string): Array<{ file: string; issue: string; suggestion: string }> {
+  const feedback: Array<{ file: string; issue: string; suggestion: string }> = [];
+  let current: { file: string; issue: string; suggestion: string } | null = null;
+
+  for (const line of output.split(/\r?\n/)) {
+    const fileMatch = line.match(/^FILE:\s*(.+)$/i);
+    const issueMatch = line.match(/^ISSUE:\s*(.+)$/i);
+    const suggestMatch = line.match(/^SUGGESTION:\s*(.+)$/i);
+
+    if (fileMatch) {
+      if (current) feedback.push(current);
+      current = { file: fileMatch[1].trim(), issue: "", suggestion: "" };
+    } else if (issueMatch && current) {
+      current.issue = issueMatch[1].trim();
+    } else if (suggestMatch && current) {
+      current.suggestion = suggestMatch[1].trim();
+    }
+  }
+  if (current) feedback.push(current);
+  return feedback;
+}
+
+/** Restore all files from a backup directory. */
+function restoreFromBackup(backupDir: string, cwd: string): void {
+  if (!existsSync(backupDir)) return;
+  for (const entry of readdirSync(backupDir, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name !== ".backup-manifest") {
+      const src = join(backupDir, entry.name);
+      const dest = resolve(cwd, entry.name);
+      ensureParentDirectory(dest);
+      copyFileSync(src, dest);
+    }
+  }
 }
 
 export async function runSemanticSync(options: CliOptions, currentMap: string, changedFiles: string[]): Promise<string> {
