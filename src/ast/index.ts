@@ -1,21 +1,20 @@
-export type { AstResult } from "./types.js";
 export { extractPythonSymbols } from "./python.js";
-export { extractTs } from "./ts.js";
+export { extractTsAst } from "./ts.js";
 export { extractCpp } from "./cpp.js";
 export { extractAsm } from "./asm.js";
+export type { AstResult } from "./types.js";
 
-import type { AstResult } from "./types.js";
 import { extractPythonSymbols } from "./python.js";
-import { extractTs } from "./ts.js";
+import { extractTsAst } from "./ts.js";
 import { extractCpp } from "./cpp.js";
 import { extractAsm } from "./asm.js";
+import type { AstResult } from "./types.js";
 
 /**
  * Extract symbols from a source file based on its extension.
  */
 export function extractSymbols(filePath: string, ext: string): AstResult {
-  const exports: string[] = [];
-  const imports: string[] = [];
+  const def: AstResult = { exports: Array<string>(), imports: Array<string>(), functions: Array<string>(), types: Array<string>() };
 
   switch (ext) {
     case ".py":
@@ -26,7 +25,7 @@ export function extractSymbols(filePath: string, ext: string): AstResult {
     case ".tsx":
     case ".mjs":
     case ".cjs":
-      return extractTs(filePath);
+      return extractTsAst(filePath);
     case ".c":
     case ".cpp":
     case ".cc":
@@ -41,6 +40,6 @@ export function extractSymbols(filePath: string, ext: string): AstResult {
     case ".inc":
       return extractAsm(filePath);
     default:
-      return { exports, imports, functions: [], types: [] };
+      return def;
   }
 }
