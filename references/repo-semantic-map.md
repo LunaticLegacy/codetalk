@@ -40,7 +40,11 @@ map is a working contract for agentic code modification.
 - `parseOptions(args)`: parses `--cwd`, `--map`, `--out`, `--json`, `--stream`, `--llm`, `--write`, `--parallel`, API override flags, and command operands; returns normalized CLI options.
 - `printHelp()`: writes CLI usage and product positioning to stdout.
 - `initMap(options)`: creates a semantic map template when the target map file does not already exist.
-- `configure(options)`: interactively or non-interactively writes API URL, API key, and model config; `show` prints a masked summary.
+- `configure(options)`: writes API URL, API key, and model config; `show` prints a masked summary, `set` writes non-interactively, TTY mode opens a keyboard menu, and non-TTY mode falls back to plain prompts.
+- `configureTui()`: loads existing config, maintains an editable draft, and loops through a keyboard-driven menu until the user saves or quits.
+- `selectConfigAction(draft)`: renders the config menu, listens for Up/Down/Enter/Ctrl+C keypresses in raw TTY mode, and returns the selected config action.
+- `renderConfigMenu(draft, actions, selected)`: clears and redraws the terminal menu with masked API key display and current selected row.
+- `promptConfigValue(label, current)`: temporarily uses readline prompts to edit one selected config field.
 - `scanRepo(options)`: builds a product-level repository scan and prints text or JSON; with `--llm`, coordinates parallel reviewer model calls to produce a complete semantic map, and with `--write`, writes it to disk.
 - `writeMap(options)`: writes a baseline semantic map generated from current repository structure.
 - `askCodebase(options)`: sends a codebase question to the configured chat-completions API with map and scan context; uses SSE streaming when `--stream` is present.
@@ -106,7 +110,7 @@ map is a working contract for agentic code modification.
 3. The agent inspects relevant source files in parallel.
 4. Code changes are planned against the map as the current semantic contract.
 5. After edits, the agent rereads touched files and syncs the semantic map.
-6. Users manually configure API URL, API key, and model with `codetalker config` or environment variables.
+6. Users configure API URL, API key, and model with `codetalker config` in an interactive TTY menu, `codetalker config set` in scripts, or environment variables.
 7. `codetalker ask` and `codetalker plan` read the semantic map and repo scan, then call the configured API.
 8. `codetalker scan --llm --write` lists all source files, asks a coordinator agent for an inspection plan, runs up to `--parallel` reviewer agents over file shards, asks a merger agent to produce the final semantic map, emits non-streaming progress to stderr while waiting, and writes the returned complete semantic map to `CODEMAP.md`.
 9. `codetalker plan "message" --write --out path.md` writes a reviewable implementation plan to disk without modifying source files.
@@ -123,6 +127,7 @@ map is a working contract for agentic code modification.
 - Maintains `agents/openai.yaml` as the UI-facing metadata for this skill package.
 - `codetalker map`, `init`, and `sync` write markdown files.
 - `codetalker config` writes API configuration to `~/.codetalker/config.json` by default or `CODETALKER_CONFIG` when set.
+- `codetalker config` in a TTY clears and redraws a local menu on stdout/stderr-compatible terminal streams, masks existing API keys in the menu, and writes config only after the user selects save.
 - `codetalker ask` and `codetalker plan` send the semantic map, repository scan, and user request to the configured API URL.
 - `codetalker plan --write` writes the model-returned plan to `CODEPLAN.md` by default or the `--out` path.
 - `codetalker scan --llm` sends repository file lists, reviewer shard evidence, reviewer outputs, and the existing map to the configured API URL across coordinator, reviewer, and merger requests.

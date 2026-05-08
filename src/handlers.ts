@@ -2,9 +2,10 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdir
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
+import { emitKeypressEvents } from "node:readline";
 import { createInterface } from "node:readline/promises";
 
-import type { CliOptions, ScanReport, SourceFile } from "./types.js";
+import type { CliOptions, CodetalkerConfig, ScanReport, SourceFile } from "./types.js";
 import { MissionPanel } from "./panel.js";
 import { callChatCompletion, runPrompt, runPromptCapture } from "./api.js";
 import {
@@ -76,6 +77,11 @@ Model: ${config.model}`);
     return;
   }
 
+  if (process.stdin.isTTY && process.stdout.isTTY) {
+    await configureTui();
+    return;
+  }
+
   const existing = tryReadConfig();
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -96,6 +102,145 @@ Model: ${config.model}`);
 }
 
 // ── scan (always writes) ─────────────────────────────────────────────────────
+// Config TUI helpers
+
+type ConfigAction = "apiUrl" | "apiKey" | "model" | "save" | "quit";
+
+async function configureTui(): Promise<void> {
+  const existing = tryReadConfig();
+  const draft: CodetalkerConfig = {
+    apiUrl: existing?.apiUrl || DEFAULT_API_URL,
+    apiKey: existing?.apiKey || "",
+    model: existing?.model || DEFAULT_MODEL
+  };
+
+  while (true) {
+    const action = await selectConfigAction(draft);
+
+    if (action === "quit") {
+      process.stdout.write("\nConfig unchanged.\n");
+      return;
+    }
+
+    if (action === "save") {
+      if (!draft.apiKey.trim()) {
+        process.stdout.write("\nAPI key is required before saving.\n");
+        await waitForEnter();
+        continue;
+      }
+
+      writeConfig({
+        apiUrl: trimTrailingSlash(draft.apiUrl.trim() || DEFAULT_API_URL),
+        apiKey: draft.apiKey.trim(),
+        model: draft.model.trim() || DEFAULT_MODEL
+      });
+      process.stdout.write(`\nSaved config: ${configPath()}\n`);
+      return;
+    }
+
+    const next = await promptConfigValue(labelForAction(action), draft[action]);
+    if (next.trim()) {
+      draft[action] = next.trim();
+    }
+  }
+}
+
+function selectConfigAction(draft: CodetalkerConfig): Promise<ConfigAction> {
+  const actions: Array<{ action: ConfigAction; label: string }> = [
+    { action: "apiUrl", label: "API URL" },
+    { action: "apiKey", label: "API key" },
+    { action: "model", label: "Model" },
+    { action: "save", label: "Save and exit" },
+    { action: "quit", label: "Quit without saving" }
+  ];
+  let selected = 0;
+
+  return new Promise((resolveAction) => {
+    const input = process.stdin;
+
+    const cleanup = (): void => {
+      input.off("keypress", onKeypress);
+      if (input.isTTY) input.setRawMode(false);
+      input.pause();
+    };
+
+    const finish = (action: ConfigAction): void => {
+      cleanup();
+      process.stdout.write("\n");
+      resolveAction(action);
+    };
+
+    const onKeypress = (_chunk: string, key: { name?: string; ctrl?: boolean }): void => {
+      if (key.ctrl && key.name === "c") {
+        finish("quit");
+        return;
+      }
+
+      if (key.name === "up") {
+        selected = (selected - 1 + actions.length) % actions.length;
+        renderConfigMenu(draft, actions, selected);
+        return;
+      }
+
+      if (key.name === "down") {
+        selected = (selected + 1) % actions.length;
+        renderConfigMenu(draft, actions, selected);
+        return;
+      }
+
+      if (key.name === "return" || key.name === "enter") {
+        finish(actions[selected].action);
+      }
+    };
+
+    emitKeypressEvents(input);
+    input.on("keypress", onKeypress);
+    input.setRawMode(true);
+    input.resume();
+    renderConfigMenu(draft, actions, selected);
+  });
+}
+
+function renderConfigMenu(draft: CodetalkerConfig, actions: Array<{ action: ConfigAction; label: string }>, selected: number): void {
+  process.stdout.write("\x1b[2J\x1b[H");
+  process.stdout.write("codetalk config\n\n");
+  process.stdout.write(`Config path: ${configPath()}\n\n`);
+  process.stdout.write(`API URL: ${draft.apiUrl || "(empty)"}\n`);
+  process.stdout.write(`API key: ${draft.apiKey ? maskSecret(draft.apiKey) : "(empty)"}\n`);
+  process.stdout.write(`Model: ${draft.model || "(empty)"}\n\n`);
+  process.stdout.write("Use Up/Down, Enter to select, Ctrl+C to quit.\n\n");
+
+  for (let i = 0; i < actions.length; i++) {
+    process.stdout.write(`${i === selected ? ">" : " "} ${actions[i].label}\n`);
+  }
+}
+
+async function promptConfigValue(label: string, current: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const shown = label === "API key" && current ? maskSecret(current) : current;
+    return await rl.question(`${label} (${shown || "empty"}): `);
+  } finally {
+    rl.close();
+  }
+}
+
+async function waitForEnter(): Promise<void> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    await rl.question("Press Enter to continue...");
+  } finally {
+    rl.close();
+  }
+}
+
+function labelForAction(action: ConfigAction): string {
+  if (action === "apiUrl") return "API URL";
+  if (action === "apiKey") return "API key";
+  if (action === "model") return "Model";
+  return action;
+}
+// Scan
 
 export async function scanRepo(options: CliOptions): Promise<void> {
   const report = buildScanReport(options);

@@ -12,7 +12,7 @@ export const DEFAULT_API_URL = "https://api.openai.com/v1";
 export const COMMANDS = [
   { command: "codetalk help", purpose: "Show commands and user workflow." },
   { command: "codetalk init", purpose: "Create a semantic map template." },
-  { command: "codetalk config", purpose: "Manually configure API URL, API key, and model." },
+  { command: "codetalk config", purpose: "Configure API URL, API key, and model with an interactive menu." },
   { command: "codetalk scan [--stream] [--parallel 4]", purpose: "Use parallel LLM reviewers to produce architecture semantics." },
   { command: "codetalk map", purpose: "Generate a baseline semantic map from repository structure." },
   { command: "codetalk ask \"message\" [--stream]", purpose: "Answer codebase questions from map and scan context." },
@@ -78,6 +78,10 @@ Usage:
   codetalk config
   codetalk config set --api-url URL --api-key KEY [--model MODEL]
   codetalk config show
+
+Interactive mode:
+  Run without arguments in a terminal to edit config with a keyboard menu.
+  In non-TTY shells, codetalk falls back to plain prompts.
 
 Flags:
   --api-url URL   LLM API endpoint
@@ -190,7 +194,7 @@ Also available as: codetalk-cli (aliased)
 
 Commands:
   init     Create a semantic map template if one does not exist
-  config   Manually enter and store API URL, API key, and model
+  config   Configure API URL, API key, and model
   scan     Run parallel LLM reviewers to produce architecture semantics
   map      Generate a baseline semantic map from the current repo shape
   ask      Ask a codebase question using LLM
