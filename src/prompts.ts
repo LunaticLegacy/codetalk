@@ -398,17 +398,10 @@ export function reviewerPrompt(
 ): string {
   return `You are Codetalker file analyzer.
 
-Analyze this single source file. Be precise about what you observe.
-
-Focus on:
-- The file's role and responsibilities
-- Exported types, functions, classes, and their signatures
-- For each function/method: inputs, outputs, side effects, preconditions, failure modes
-- Dependencies (imports/requires)
-- Important invariants and edge cases
-
-Coordinator inspection plan:
-${inspectionPlan}
+Output a SINGLE LINE per file. Format:
+ROLE: <one sentence about what this file does>
+EXPORTS: <comma-separated list of exported symbols>
+IMPORTS: <comma-separated list of import sources>
 
 File: ${file.path} (${file.language}, ${file.bytes} bytes)
 
