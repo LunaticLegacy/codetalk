@@ -911,11 +911,27 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
     }
   } catch {}
 
-  const prompt = mergerPrompt(existingMap, formatScan(report), inspectionPlan, indexBlock, options.mapPath, options.depth || "medium");
+  const depth = options.depth || "medium";
 
-  const { content: mapResult, tokenStr: mergerTokens } = await callChatCompletion(options, prompt, panel, "merger", "Synthesizing map");
-  const result = sanitizeMarkdownMap(mapResult);
-  panel.done("merger", `Semantic map generated${mergerTokens}`);
+  let result: string;
+  if (depth === "full" || depth === "high") {
+    // Split merger: write each section in parallel, then concatenate
+    const sections = ["API Surface", "Classes", "Interfaces", "Functions", "Execution Flows", "Data Flow"];
+    const sectionTasks = sections.map((section) => async () => {
+      const sectionPrompt = mergerPrompt(existingMap, formatScan(report), inspectionPlan, indexBlock, options.mapPath, depth, section);
+      const { content } = await callChatCompletion(options, sectionPrompt, panel, "merger", `Writing section: ${section}`);
+      return `## ${section}\n\n${content.trim()}`;
+    });
+
+    const sectionResults = await runLimited(sectionTasks, 6);
+    result = `# Code Semantic Map\n\n${sectionResults.join("\n\n")}`;
+  } else {
+    const prompt = mergerPrompt(existingMap, formatScan(report), inspectionPlan, indexBlock, options.mapPath, depth);
+    const { content: mapResult, tokenStr: mergerTokens } = await callChatCompletion(options, prompt, panel, "merger", "Synthesizing map");
+    result = sanitizeMarkdownMap(mapResult);
+  }
+
+  panel.done("merger", "Semantic map generated");
   panel.finish();
 
   // Clean up temp directory

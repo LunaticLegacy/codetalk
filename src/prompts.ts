@@ -498,8 +498,33 @@ export function mergerPrompt(
   inspectionPlan: string,
   perFileAnalyses: string,
   mapPath: string,
-  depth: string = "medium"
+  depth: string = "medium",
+  section?: string
 ): string {
+  if (section) {
+    return `You are Codetalker — a senior software architect producing a living semantic map.
+
+Goal:
+- Write the "${section}" section of the semantic map.
+- Focus ONLY on this section. Be thorough but concise.
+- Return markdown content for this section only (no heading prefix needed).
+
+Requirements for this section:
+${sectionRequirements(section)}
+
+Existing semantic map:
+${existingMap}
+
+Repository scan:
+${reportSummary}
+
+Coordinator inspection plan:
+${inspectionPlan}
+
+Per-file analyses (source index):
+${perFileAnalyses}`;
+  }
+
   const sections = depth === "full" || depth === "high"
     ? fullDepthSections()
     : mediumDepthSections();
@@ -523,6 +548,62 @@ ${inspectionPlan}
 
 Per-file analyses:
 ${perFileAnalyses}`;
+}
+
+function sectionRequirements(section: string): string {
+  const reqs: Record<string, string> = {
+    "API Surface": `List:
+- CLI commands: every command, its purpose, available flags
+- HTTP/RPC API endpoints (if any): method, path, request/response shape
+- Exported package API: public classes, functions, constants, their signatures
+
+Be specific about each command's flags and their defaults.`,
+
+    "Classes": `For each class:
+- Class name and file path
+- Constructor: parameters and initialization logic
+- Stored fields / instance state: field name, type, initial value
+- Static fields
+- Invariants
+- Lifecycle: creation → usage → destruction`,
+
+    "Interfaces": `For each interface or type alias:
+- Name
+- Fields with types
+- Implementers / users (which classes/functions use it)
+- Semantic meaning in the domain
+- Constraints (valid ranges, required conditions)`,
+
+    "Functions": `For each function or method:
+- Full name: Class.method or module.function
+- Visibility / export status
+- Parameters: name, type, optional/default
+- Return value: type and semantics
+- Side effects: I/O, state changes, network calls
+- Errors thrown
+- External calls: what this function calls
+- Called by: reverse dependency
+- Semantic role: what it achieves`,
+
+    "Execution Flows": `Document each major execution path as a sub-section:
+- Startup flow: initialization order
+- Command flow: user command dispatch and handling
+- Plan flow: request → CODEPLAN.md
+- Exec flow: plan → file edits
+- Scan flow: repo → CODEMAP.md
+- Error flow: how errors propagate
+- Rollback flow: how changes revert
+
+For each flow, list the steps in order.`,
+
+    "Data Flow": `Document how data moves through the system:
+- Data sources (inputs, files, API responses)
+- Data transformations (how data changes between modules)
+- Data sinks (outputs, files written, DB writes)
+- Caching strategy
+- Data formats (JSON, Markdown, etc.)`
+  };
+  return reqs[section] || "Be thorough and precise about this section.";
 }
 
 function mediumDepthSections(): string {
