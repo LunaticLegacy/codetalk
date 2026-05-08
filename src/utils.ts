@@ -666,15 +666,22 @@ export function splitFilesForAgents(files: SourceFile[], parallel: number): Sour
   }
 
   const chunkCount = Math.min(normalizeParallel(parallel), files.length);
+
+  // Calculate average byte size for cost-weighting
+  const totalBytes = files.reduce((s, f) => s + f.bytes, 0);
+  const avgBytes = totalBytes / files.length;
+
+  // Each file has a cost = 1 (base overhead) + bytes/avgBytes
+  // This ensures no reviewer gets just 1 file even if it's huge
   const chunks = Array.from({ length: chunkCount }, () => ({
-    bytes: 0,
+    cost: 0,
     files: [] as SourceFile[]
   }));
 
   for (const file of [...files].sort((a, b) => b.bytes - a.bytes)) {
-    chunks.sort((a, b) => a.bytes - b.bytes);
+    chunks.sort((a, b) => a.cost - b.cost);
     chunks[0].files.push(file);
-    chunks[0].bytes += file.bytes;
+    chunks[0].cost += 1 + (avgBytes > 0 ? file.bytes / avgBytes : 0);
   }
 
   return chunks.map((chunk) => chunk.files.sort((a, b) => a.path.localeCompare(b.path)));
