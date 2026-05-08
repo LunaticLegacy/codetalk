@@ -30,26 +30,24 @@ export class MissionPanel {
   }
 
   finish(): void {
-    // Cursor is already at the bottom of the panel after last render;
-    // no need to move it — terminal prompt will appear naturally below.
+    // Cursor is already at the bottom of the panel after last render.
   }
 
   #render(): void {
     if (this.#isTTY) {
-      const count = this.#agents.length;
       if (!this.#started) {
-        // First render: push panel below the command line, then write the first line
+        // First render: save position, write all agent lines
         this.#started = true;
+        process.stderr.write("\n");  // move below the command line
+        process.stderr.write("\x1b[s");  // save cursor (start of panel area)
         for (const agent of this.#agents) {
           const mark = agent.done ? "✓" : "·";
           process.stderr.write(`\r\x1b[K${mark} ${agent.id}: ${agent.status}\n`);
         }
         return;
       }
-      // Subsequent renders: move cursor up to first panel line, then redraw all
-      if (count > 0) {
-        process.stderr.write(`\x1b[${count}A`);
-      }
+      // Subsequent renders: restore cursor to panel start, redraw all lines
+      process.stderr.write("\x1b[u");  // restore to start of panel area
       for (const agent of this.#agents) {
         const mark = agent.done ? "✓" : "·";
         process.stderr.write(`\r\x1b[K${mark} ${agent.id}: ${agent.status}\n`);
