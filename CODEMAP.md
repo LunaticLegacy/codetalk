@@ -5,7 +5,7 @@ Read it before modifying code. Update it after changing behavior.
 
 ## Architecture
 
-- **What the system does**: CLI tool (`codetalker`) that helps AI coding agents understand and modify repository semantics. It provides commands to initialize, scan, map, ask, plan, exec, sync, check, and version. Uses optional LLM integration (OpenAI-compatible API) for advanced analysis and code generation. After each API call, token usage (input with cache hit/miss breakdown, output, total) is displayed on stderr.
+- **What the system does**: CLI tool (`codetalk`) that helps AI coding agents understand and modify repository semantics. It provides commands to initialize, scan, map, ask, plan, exec, sync, check, and version. Uses optional LLM integration (OpenAI-compatible API) for advanced analysis and code generation. After each API call, token usage (input with cache hit/miss breakdown, output, total) is displayed on stderr.
 - **Main execution path**: `src/index.ts` is the entry point (#!/usr/bin/env node). It parses CLI arguments manually (no third-party CLI libraries), dispatches to command handlers. Commands may read/write files, spawn `git` processes, and make HTTP calls to an LLM API.
 - **Major components and dependencies**:
   - **CLI handler** (`src/index.ts`) – single-file implementation of all commands.
@@ -43,7 +43,7 @@ Read it before modifying code. Update it after changing behavior.
 | `main()` | Entry point, parses `process.argv`, dispatches commands. | None (reads `process.argv`, `process.env`) | `Promise<void>` | Reads/writes files, spawns git, calls LLM. Exit 0 or 1. |
 | `parseOptions(args)` | Parse CLI args into `CliOptions`. | `args: string[]` | `CliOptions` | None. |
 | `printHelp()` | Print usage to stdout. | None | `void` | Writes to stdout. |
-| `printVersion()` | Print version string. | None | `void` | Writes `codetalker vX.Y.Z` to stdout. |
+| `printVersion()` | Print version string. | None | `void` | Writes `codetalk vX.Y.Z` to stdout. |
 | `configure(options)` | Interactive or flag-based config set. | `options: CliOptions` | `Promise<void>` | Writes config file. |
 | `initMap(options)` | Create template CODEMAP.md. | `options: CliOptions` | `void` | Writes CODEMAP.md. |
 | `scanRepo(options)` | Run LLM architecture scan (`--llm` is **required**, fails otherwise). | `options: CliOptions` | `Promise<void>` | Builds report, runs multi-agent scan, optionally writes map. |
@@ -163,7 +163,7 @@ After each LLM API call, `showTokenUsage` writes to stderr:
 | `CODEMAP.md` | `init`, `map`, `scan --write`, `sync` | Always or when `--write` set. |
 | `CODEPLAN.md` (default) | `plan --write` | When `--write` flag provided. |
 | Target files from plan | `exec` | Each identified file is created or overwritten. |
-| Config file (`~/.config/codetalker/config.json`) | `config set` | Always when config command runs. |
+| Config file (`~/.config/codetalk/config.json`) | `config set` | Always when config command runs. |
 
 ### Terminal State Changes
 - **TTY mode**: `MissionPanel` emits `\n` on first render to push panel below the command line, then uses `\x1b[N A` (cursor up) and `\x1b[K` (clear line) on stderr for in-place per-agent progress. `finish()` resets cursor with `\x1b[N B`.

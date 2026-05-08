@@ -1,11 +1,10 @@
 {
-  "name": "code-semantic-sync",
+  "name": "codetalk",
   "version": "0.1.0",
   "description": "Maintain a living semantic map that agents use to understand and safely modify code.",
   "type": "module",
   "bin": {
-    "codetalker": "./dist/index.js",
-    "code-semantic-sync": "./dist/index.js"
+    "codetalk": "./dist/index.js"
   },
   "files": [
     "dist",

@@ -1,6 +1,6 @@
 # Code Semantic Sync
 
-`codetalker` is a semantic-map-driven AI coding CLI.
+`codetalk` is a semantic-map-driven AI coding CLI.
 
 It maintains a project-local `CODEMAP.md` so an AI agent can read the semantic
 contract before changing code, use that contract to understand and plan edits,
@@ -14,10 +14,10 @@ next code change.
 npm install -D code-semantic-sync
 ```
 
-Always use the `codetalker xxx` command shape:
+Always use the `codetalk xxx` command shape:
 
 ```bash
-npx codetalker help
+npx codetalk help
 ```
 
 ## First Run
@@ -25,19 +25,19 @@ npx codetalker help
 1. Initialize the semantic map:
 
 ```bash
-npx codetalker init
+npx codetalk init
 ```
 
 2. Manually enter API URL, API key, and model:
 
 ```bash
-npx codetalker config
+npx codetalk config
 ```
 
 Non-interactive setup is also supported:
 
 ```bash
-npx codetalker config set --api-url https://api.openai.com/v1 --api-key sk-xxx --model gpt-4.1
+npx codetalk config set --api-url https://api.openai.com/v1 --api-key sk-xxx --model gpt-4.1
 ```
 
 The default config path is:
@@ -58,55 +58,55 @@ CODETALKER_MODEL=gpt-4.1
 
 | User intent | Command | Output |
 | --- | --- | --- |
-| Show help | `codetalker help` | Commands and usage table |
-| Initialize a repo | `codetalker init` | `CODEMAP.md` |
-| Configure API | `codetalker config` | Local API URL, API key, and model config |
-| Configure API non-interactively | `codetalker config set --api-url URL --api-key KEY --model MODEL` | Local API config |
-| Show config | `codetalker config show` | Masked config summary |
-| Scan repo | `codetalker scan` | Source, command surface, config, semantic maps, CI, module roles |
-| Emit scan JSON | `codetalker scan --json` | Structured repository scan |
-| LLM architecture scan | `codetalker scan --llm` | Complete semantic map text generated from file evidence |
-| Land architecture on disk | `codetalker scan --llm --write` | Write the LLM-generated semantic map to `CODEMAP.md` |
-| Parallel architecture scan | `codetalker scan --llm --write --parallel 8` | Use 8 parallel reviewers to inspect file shards, then merge into `CODEMAP.md` |
-| Generate map | `codetalker map` | Baseline `CODEMAP.md` from repo structure |
-| Ask about code | `codetalker ask "How does auth work?"` | Answer grounded in the map and repo shape |
-| Ask with streaming output | `codetalker ask "How does auth work?" --stream` | Incremental answer as tokens arrive |
-| Plan a change | `codetalker plan "Add magic-link login"` | Implementation plan, risks, verification steps |
-| Plan with streaming output | `codetalker plan "Add magic-link login" --stream` | Incremental plan as tokens arrive |
-| Write a plan | `codetalker plan "Add magic-link login" --write` | Write the plan to `CODEPLAN.md` |
-| Write a plan to a path | `codetalker plan "Add magic-link login" --write --out plans/auth.md` | Write the plan to a chosen Markdown file |
-| Sync after edits | `codetalker sync` | Updated change-sync section in `CODEMAP.md` |
-| Stream sync progress | `codetalker sync --stream` | Local sync progress while the map is updated |
-| LLM semantic sync | `codetalker sync --llm --stream` | Update the complete semantic map from changed files with progress output |
-| CI freshness check | `codetalker check` | Nonzero exit when the map is missing or stale |
+| Show help | `codetalk help` | Commands and usage table |
+| Initialize a repo | `codetalk init` | `CODEMAP.md` |
+| Configure API | `codetalk config` | Local API URL, API key, and model config |
+| Configure API non-interactively | `codetalk config set --api-url URL --api-key KEY --model MODEL` | Local API config |
+| Show config | `codetalk config show` | Masked config summary |
+| Scan repo | `codetalk scan` | Source, command surface, config, semantic maps, CI, module roles |
+| Emit scan JSON | `codetalk scan --json` | Structured repository scan |
+| LLM architecture scan | `codetalk scan --llm` | Complete semantic map text generated from file evidence |
+| Land architecture on disk | `codetalk scan --llm --write` | Write the LLM-generated semantic map to `CODEMAP.md` |
+| Parallel architecture scan | `codetalk scan --llm --write --parallel 8` | Use 8 parallel reviewers to inspect file shards, then merge into `CODEMAP.md` |
+| Generate map | `codetalk map` | Baseline `CODEMAP.md` from repo structure |
+| Ask about code | `codetalk ask "How does auth work?"` | Answer grounded in the map and repo shape |
+| Ask with streaming output | `codetalk ask "How does auth work?" --stream` | Incremental answer as tokens arrive |
+| Plan a change | `codetalk plan "Add magic-link login"` | Implementation plan, risks, verification steps |
+| Plan with streaming output | `codetalk plan "Add magic-link login" --stream` | Incremental plan as tokens arrive |
+| Write a plan | `codetalk plan "Add magic-link login" --write` | Write the plan to `CODEPLAN.md` |
+| Write a plan to a path | `codetalk plan "Add magic-link login" --write --out plans/auth.md` | Write the plan to a chosen Markdown file |
+| Sync after edits | `codetalk sync` | Updated change-sync section in `CODEMAP.md` |
+| Stream sync progress | `codetalk sync --stream` | Local sync progress while the map is updated |
+| LLM semantic sync | `codetalk sync --llm --stream` | Update the complete semantic map from changed files with progress output |
+| CI freshness check | `codetalk check` | Nonzero exit when the map is missing or stale |
 
 ## Product Workflow
 
 ```text
-codetalker init
-codetalker config
-codetalker scan --llm --write
-codetalker ask "How does this repo work?"
-codetalker ask "How does this repo work?" --stream
-codetalker plan "Add a new feature safely"
-codetalker plan "Add a new feature safely" --stream
-codetalker plan "Add a new feature safely" --write --out plans/next.md
-codetalker sync
-codetalker sync --llm --stream
-codetalker check
+codetalk init
+codetalk config
+codetalk scan --llm --write
+codetalk ask "How does this repo work?"
+codetalk ask "How does this repo work?" --stream
+codetalk plan "Add a new feature safely"
+codetalk plan "Add a new feature safely" --stream
+codetalk plan "Add a new feature safely" --write --out plans/next.md
+codetalk sync
+codetalk sync --llm --stream
+codetalk check
 ```
 
-`codetalker scan --json` emits the same information as structured JSON for
+`codetalk scan --json` emits the same information as structured JSON for
 future agent runtimes and automation.
 
-`codetalker scan` is local and fast by default. `codetalker scan --llm --write`
+`codetalk scan` is local and fast by default. `codetalk scan --llm --write`
 lists every source file, asks a coordinator agent for an inspection plan, splits
 files across parallel reviewer agents, then asks a merger agent to write the
 complete `CODEMAP.md`. `--parallel` defaults to 4 and values below 1 are treated
 as 1.
 
-`codetalker sync` updates only the local change checklist by default.
-`codetalker sync --llm` asks the model to return a complete updated semantic
+`codetalk sync` updates only the local change checklist by default.
+`codetalk sync --llm` asks the model to return a complete updated semantic
 map based on git changes, changed source evidence, and the current map.
 
 Non-streaming LLM tasks do not wait silently. Without `--stream`, `ask`,
@@ -126,8 +126,8 @@ map synchronization.
 
 ## API Compatibility
 
-`codetalker ask`, `codetalker plan`, `codetalker scan --llm`, and
-`codetalker sync --llm` use an OpenAI-compatible
+`codetalk ask`, `codetalk plan`, `codetalk scan --llm`, and
+`codetalk sync --llm` use an OpenAI-compatible
 `/chat/completions` endpoint:
 
 ```text

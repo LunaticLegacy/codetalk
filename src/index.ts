@@ -139,16 +139,16 @@ const DEFAULT_PLAN_PATH = "CODEPLAN.md";
 const DEFAULT_MODEL = "gpt-4.1";
 const DEFAULT_API_URL = "https://api.openai.com/v1";
 const COMMANDS = [
-  { command: "codetalker help", purpose: "Show commands and user workflow." },
-  { command: "codetalker init", purpose: "Create a semantic map template." },
-  { command: "codetalker config", purpose: "Manually configure API URL, API key, and model." },
-  { command: "codetalker scan [--write] [--stream] [--parallel 4]", purpose: "Use parallel LLM reviewers to produce architecture semantics." },
-  { command: "codetalker map", purpose: "Generate a baseline semantic map from repository structure." },
-  { command: "codetalker ask \"message\" [--stream]", purpose: "Answer codebase questions from map and scan context." },
-  { command: "codetalker plan \"request\" [--stream] [--out CODEPLAN.md]", purpose: "Generate a safe implementation plan and write it to disk." },
-  { command: "codetalker exec [--plan CODEPLAN.md] [--parallel 4] [--stream]", purpose: "Execute a CODEPLAN.md: apply all file changes in parallel via LLM." },
-  { command: "codetalker sync [--stream]", purpose: "Refresh the semantic map change-sync section with LLM semantic updates." },
-  { command: "codetalker check", purpose: "Fail when the semantic map is missing or stale." }
+  { command: "codetalk help", purpose: "Show commands and user workflow." },
+  { command: "codetalk init", purpose: "Create a semantic map template." },
+  { command: "codetalk config", purpose: "Manually configure API URL, API key, and model." },
+  { command: "codetalk scan [--write] [--stream] [--parallel 4]", purpose: "Use parallel LLM reviewers to produce architecture semantics." },
+  { command: "codetalk map", purpose: "Generate a baseline semantic map from repository structure." },
+  { command: "codetalk ask \"message\" [--stream]", purpose: "Answer codebase questions from map and scan context." },
+  { command: "codetalk plan \"request\" [--stream] [--out CODEPLAN.md]", purpose: "Generate a safe implementation plan and write it to disk." },
+  { command: "codetalk exec [--plan CODEPLAN.md] [--parallel 4] [--stream]", purpose: "Execute a CODEPLAN.md: apply all file changes in parallel via LLM." },
+  { command: "codetalk sync [--stream]", purpose: "Refresh the semantic map change-sync section with LLM semantic updates." },
+  { command: "codetalk check", purpose: "Fail when the semantic map is missing or stale." }
 ];
 const SOURCE_EXTENSIONS = new Map<string, string>([
   [".js", "JavaScript"],
@@ -248,7 +248,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  fail(`Unknown command: ${command}\nRun "codetalker help" for usage.`);
+  fail(`Unknown command: ${command}\nRun "codetalk help" for usage.`);
 }
 
 function parseOptions(args: string[]): CliOptions {
@@ -330,25 +330,25 @@ function parseOptions(args: string[]): CliOptions {
 }
 
 function printVersion(): void {
-  console.log(`codetalker v${VERSION}`);
+  console.log(`codetalk v${VERSION}`);
 }
 
 function printHelp(): void {
-  console.log(`codetalker v${VERSION} - maintain a living semantic map for agentic code changes
+  console.log(`codetalk v${VERSION} - maintain a living semantic map for agentic code changes
 
 Usage:
-  codetalker init [--map CODEMAP.md]
-  codetalker config
-  codetalker config set --api-url URL --api-key KEY [--model MODEL]
-  codetalker config show
-  codetalker scan [--write] [--json] [--stream] [--parallel 4]
-  codetalker map [--map CODEMAP.md]
-  codetalker ask "How does auth work?" [--stream]
-  codetalker plan "Add magic-link login" [--stream] [--out CODEPLAN.md]
-  codetalker exec [--plan CODEPLAN.md] [--parallel 4] [--stream]
-  codetalker sync [--map CODEMAP.md] [--stream]
-  codetalker check [--map CODEMAP.md]
-  codetalker version
+  codetalk init [--map CODEMAP.md]
+  codetalk config
+  codetalk config set --api-url URL --api-key KEY [--model MODEL]
+  codetalk config show
+  codetalk scan [--write] [--json] [--stream] [--parallel 4]
+  codetalk map [--map CODEMAP.md]
+  codetalk ask "How does auth work?" [--stream]
+  codetalk plan "Add magic-link login" [--stream] [--out CODEPLAN.md]
+  codetalk exec [--plan CODEPLAN.md] [--parallel 4] [--stream]
+  codetalk sync [--map CODEMAP.md] [--stream]
+  codetalk check [--map CODEMAP.md]
+  codetalk version
 
 Commands:
   init    Create a semantic map template if one does not exist
@@ -363,23 +363,23 @@ Commands:
   version Print version and exit
 
 User guide:
-  Need to start a repo        codetalker init
-  Need to configure API       codetalker config
-  Need repo understanding     codetalker scan
-  Need architecture on disk   codetalker scan --write
-  Need larger repo scan       codetalker scan --parallel 8
-  Need a semantic map         codetalker map
-  Need to ask about code      codetalker ask "question"
-  Need streaming answers      codetalker ask "question" --stream
-  Need a change plan          codetalker plan "request"
-  Need streaming plans        codetalker plan "request" --stream
-  Need to execute a plan     codetalker exec
-  Need parallel execution    codetalker exec --parallel 8
-  Need to sync after edits    codetalker sync
-  Need CI freshness checks    codetalker check
-  Need version info           codetalker version
+  Need to start a repo        codetalk init
+  Need to configure API       codetalk config
+  Need repo understanding     codetalk scan
+  Need architecture on disk   codetalk scan --write
+  Need larger repo scan       codetalk scan --parallel 8
+  Need a semantic map         codetalk map
+  Need to ask about code      codetalk ask "question"
+  Need streaming answers      codetalk ask "question" --stream
+  Need a change plan          codetalk plan "request"
+  Need streaming plans        codetalk plan "request" --stream
+  Need to execute a plan     codetalk exec
+  Need parallel execution    codetalk exec --parallel 8
+  Need to sync after edits    codetalk sync
+  Need CI freshness checks    codetalk check
+  Need version info           codetalk version
 
-Tip: Run any command with --help to see this guide (e.g. "codetalker scan --help").
+Tip: Run any command with --help to see this guide (e.g. "codetalk scan --help").
 
 The map is not just documentation. It is the shared semantic contract an
 AI agent should read before editing and update after changing code.`);
@@ -489,7 +489,7 @@ async function syncMap(options: CliOptions): Promise<void> {
 }
 
 async function askCodebase(options: CliOptions): Promise<void> {
-  const question = requireMessage(options, "Ask requires a question. Example: codetalker ask \"How does auth work?\"");
+  const question = requireMessage(options, "Ask requires a question. Example: codetalk ask \"How does auth work?\"");
   const prompt = buildAgentPrompt(options, "Answer the user's codebase question with concrete references and call out uncertainty.", question);
 
   const panel = new MissionPanel();
@@ -507,7 +507,7 @@ async function askCodebase(options: CliOptions): Promise<void> {
 }
 
 async function planChange(options: CliOptions): Promise<void> {
-  const request = requireMessage(options, "Plan requires a change request. Example: codetalker plan \"Add magic-link login\"");
+  const request = requireMessage(options, "Plan requires a change request. Example: codetalk plan \"Add magic-link login\"");
   const prompt = buildAgentPrompt(
     options,
     "Create a safe implementation plan. Do not modify files. Include affected files, semantic-map updates, risks, and verification steps.",
@@ -528,7 +528,7 @@ async function planChange(options: CliOptions): Promise<void> {
 function checkMap(options: CliOptions): void {
   const target = resolve(options.cwd, options.mapPath);
   if (!existsSync(target)) {
-    fail(`Missing semantic map: ${options.mapPath}. Run "codetalker init" or "codetalker map".`);
+    fail(`Missing semantic map: ${options.mapPath}. Run "codetalk init" or "codetalk map".`);
   }
 
   const mapMtime = statSync(target).mtimeMs;
@@ -865,7 +865,7 @@ function buildMap(root: string, files: SourceFile[]): string {
 
   return `# Code Semantic Map
 
-Generated by \`codetalker map\` on ${generatedAt}.
+Generated by \`codetalk map\` on ${generatedAt}.
 
 This file is the repository's semantic contract for agentic code changes.
 Read it before modifying code. Update it after changing behavior.
@@ -1446,7 +1446,7 @@ function sanitizeMarkdownMap(markdown: string): string {
 function readMapForContext(options: CliOptions): string {
   const target = resolve(options.cwd, options.mapPath);
   if (!existsSync(target)) {
-    fail(`Missing semantic map: ${options.mapPath}. Run "codetalker init" or "codetalker map" first.`);
+    fail(`Missing semantic map: ${options.mapPath}. Run "codetalk init" or "codetalk map" first.`);
   }
 
   return readFileSync(target, "utf8");
@@ -1459,7 +1459,7 @@ function readConfig(options: CliOptions): CodetalkerConfig {
   const model = options.model || process.env.CODETALKER_MODEL || fileConfig?.model || DEFAULT_MODEL;
 
   if (!apiUrl || !apiKey) {
-    fail(`Missing API config. Run "codetalker config" or set CODETALKER_API_URL and CODETALKER_API_KEY.`);
+    fail(`Missing API config. Run "codetalk config" or set CODETALKER_API_URL and CODETALKER_API_KEY.`);
   }
 
   return {
@@ -1500,7 +1500,7 @@ function writeConfig(config: CodetalkerConfig): void {
 async function execution(options: CliOptions): Promise<void> {
   const planPath = resolve(options.cwd, options.planPath);
   if (!existsSync(planPath)) {
-    fail(`Plan file not found: ${options.planPath}. Run "codetalker plan" first.`);
+    fail(`Plan file not found: ${options.planPath}. Run "codetalk plan" first.`);
   }
 
   const panel = new MissionPanel();
