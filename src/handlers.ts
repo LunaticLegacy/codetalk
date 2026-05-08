@@ -150,7 +150,20 @@ export async function syncMap(options: CliOptions): Promise<void> {
 
 export async function askCodebase(options: CliOptions): Promise<void> {
   const question = requireMessage(options, "Ask requires a question. Example: codetalk ask \"How does auth work?\"");
-  const prompt = buildAgentPrompt(options, "Answer the user's codebase question with concrete references and call out uncertainty.", question);
+  const prompt = buildAgentPrompt(options, `You are analyzing a codebase to answer a developer's question.
+
+Think step by step:
+1. First read the semantic contract to understand the overall architecture, modules, and key functions.
+2. Identify which modules, files, and functions are most relevant to the question.
+3. Trace the complete code path through those relevant files — follow function calls, data flow, and state changes.
+4. Synthesize your findings into a clear answer with concrete file:line references.
+
+Requirements:
+- Start with a brief summary of the relevant architecture.
+- Reference specific files, functions, and line numbers wherever applicable.
+- Distinguish observed behavior from inference. If a code path is unclear, say so.
+- If the question involves data flow, trace it from input to output.
+- If there are edge cases, call them out.`, question);
 
   const panel = new MissionPanel();
   panel.add("ask", "Preparing question context...");
@@ -172,7 +185,25 @@ export async function planChange(options: CliOptions): Promise<void> {
   const request = requireMessage(options, "Plan requires a change request. Example: codetalk plan \"Add magic-link login\"");
   const prompt = buildAgentPrompt(
     options,
-    "Create a safe implementation plan. Do not modify files. Include affected files, semantic-map updates, risks, and verification steps.",
+    `You are creating a safe, reviewable implementation plan for a code change.
+
+Think step by step:
+1. First read the semantic contract to understand the relevant architecture, modules, and functions.
+2. Analyze the existing code paths that will be affected — follow data flow, state changes, and dependencies.
+3. Design the implementation approach:
+   a. Which files need to be created, modified, or deleted
+   b. What each file's new behavior should be
+   c. How the change affects existing contracts (APIs, data formats, side effects)
+4. Identify risks, edge cases, and backward-compatibility concerns.
+5. Define verification steps.
+
+Requirements:
+- List every affected file with a clear description of what changes.
+- Include the semantic-map sections that must be updated after implementation.
+- For each risk, describe both the risk and a specific mitigation.
+- Prefer minimal, focused changes over large refactors.
+- Do NOT modify any files — produce a plan only.
+- Use this structure: Goal, Affected Files, Specific Code Changes, Semantic Map Updates, Risks, Implementation Order.`,
     request
   );
 
@@ -304,21 +335,33 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
 
   panel.add("merger", "Merging all reviewer outputs into semantic map...");
 
-  const prompt = `You are Codetalker running an architecture scan.
+  const prompt = `You are Codetalker — a senior software architect producing a living semantic map.
 
 Goal:
-- Merge parallel reviewer outputs into a complete semantic map that can be written to ${options.mapPath}.
-- Produce a complete semantic map that can be written to ${options.mapPath}.
-- This is not passive documentation. It is the behavioral contract an AI coding agent will read before modifying code.
+- Merge parallel reviewer outputs into a complete, accurate semantic map that can be written to ${options.mapPath}.
+- This is NOT passive documentation. It is the behavioral contract that AI coding agents will read before modifying code. Every detail matters.
 
 Rules:
-- Return markdown only.
-- Start with "# Code Semantic Map".
+- Return markdown only, starting with "# Code Semantic Map".
 - Include these stable sections: Architecture, Modules, Types, Functions, Runtime Flow, Side Effects, Agent Change Protocol, Change Sync.
-- Distinguish observed behavior from inference.
-- For functions and methods, include purpose, inputs, outputs, side effects, and failure modes when visible.
-- Mention files that reviewers reported as truncated or not fully inspectable.
+
+For each section:
+- Architecture: Describe what the system does, its main execution path, major components, scale, and design philosophy.
+- Modules: List every module/file with its role, responsibilities, and collaborators in a table.
+- Types: Document each type with purpose, fields, and invariants.
+- Functions: For every function or method, record: purpose, inputs, outputs, side effects, preconditions, postconditions, failure modes.
+- Runtime Flow: Document startup, normal execution paths, error paths, and teardown.
+- Side Effects: List files written, files read, network calls, process spawning, state changes, caches.
+- Agent Change Protocol: Define the before/during/after editing contract.
+- Change Sync: Initialize the change tracking section.
+
+Quality standards:
+- Be precise about behavior, not just intent.
+- Distinguish observed code behavior from inference when ambiguous.
+- When a file was truncated, explicitly state what remains uncertain.
 - Prefer observed reviewer evidence over inference.
+- Prefer concise bullet lists or tables when they improve scanability.
+- If reviewers produced conflicting observations, call out the conflict.
 
 Existing semantic map:
 ${existingMap}
