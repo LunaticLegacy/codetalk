@@ -75,6 +75,10 @@ export const SOURCE_EXTENSIONS = new Map<string, string>([
   [".cpp", "C++"],
   [".c", "C"],
   [".h", "C/C++ Header"],
+  [".hpp", "C/C++ Header"],
+  [".cc", "C++"],
+  [".cxx", "C++"],
+  [".hh", "C/C++ Header"],
   [".swift", "Swift"]
 ]);
 
