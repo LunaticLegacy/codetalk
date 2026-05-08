@@ -280,7 +280,7 @@ export async function execution(options: CliOptions): Promise<void> {
     const fileContent = existsSync(filePath) ? readFileSync(filePath, "utf8") : "(new file)";
 
     panel.update(agentId, `Asking LLM to generate new code for ${spec.filePath}...`);
-    const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan);
+    const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan, currentMap);
     let newContent = await callChatCompletion(options, editorPrompt, panel, agentId);
     newContent = stripCodeFence(newContent);
 
@@ -598,14 +598,22 @@ Implementation plan:
 ${plan}`;
 }
 
-export function createExecEditorPrompt(filePath: string, changeDescription: string, currentContent: string, plan: string): string {
+export function createExecEditorPrompt(filePath: string, changeDescription: string, currentContent: string, plan: string, currentMap: string): string {
   return `You are Codetalker file editor.
+
+Context:
+- This file is part of a larger project. The semantic map below describes the project's types, classes, modules, and functions.
+- BEFORE writing code that references symbols (classes, functions, attributes, imports) from OTHER files in the project, check the semantic map to verify those symbols exist.
+- Do NOT invent attributes, methods, function signatures, or import paths — only use what is confirmed in the semantic map or the actual file content below.
 
 Goal:
 - Modify the file ${filePath} according to the change description below.
 - Return the COMPLETE new file content. Do NOT truncate or use placeholders.
 - Preserve all existing code that does not need to change.
 - If the file is new (no existing content), create it from scratch.
+
+Semantic map (project reference):
+${currentMap}
 
 Change description for ${filePath}:
 ${changeDescription}
