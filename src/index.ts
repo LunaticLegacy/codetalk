@@ -97,20 +97,23 @@ class MissionPanel {
   }
 
   finish(): void {
-    if (this.#isTTY && this.#agents.length > 0) {
-      process.stderr.write(`\x1b[${this.#agents.length}B`);
-    }
+    // Cursor is already at the bottom of the panel after last render;
+    // no need to move it — terminal prompt will appear naturally below.
   }
 
   #render(): void {
     if (this.#isTTY) {
       const count = this.#agents.length;
       if (!this.#started) {
-        // On first render, push output to a new line so we don't overwrite the command line
+        // First render: push panel below the command line, then write the first line
         this.#started = true;
-        process.stderr.write("\n");
+        for (const agent of this.#agents) {
+          const mark = agent.done ? "✓" : "·";
+          process.stderr.write(`\r\x1b[K${mark} ${agent.id}: ${agent.status}\n`);
+        }
+        return;
       }
-      // Move cursor up to first panel line, then redraw all
+      // Subsequent renders: move cursor up to first panel line, then redraw all
       if (count > 0) {
         process.stderr.write(`\x1b[${count}A`);
       }
@@ -1293,16 +1296,15 @@ async function callChatCompletion(options: CliOptions, prompt: string, panel?: M
       fail("API response did not include choices[0].message.content.");
     }
 
-    showTokenUsage(payload.usage);
-    progress("Model response received.");
+    progress("Model response received." + formatTokenUsage(payload.usage));
     return content;
   } finally {
     progress(undefined);
   }
 }
 
-function showTokenUsage(usage: TokenUsage | undefined): void {
-  if (!usage) return;
+function formatTokenUsage(usage: TokenUsage | undefined): string {
+  if (!usage) return "";
 
   const promptPart = `↑${usage.prompt_tokens}`;
   const cachePart = usage.prompt_tokens_details?.cached_tokens
@@ -1311,7 +1313,13 @@ function showTokenUsage(usage: TokenUsage | undefined): void {
   const outputPart = `↓${usage.completion_tokens}`;
   const totalPart = `${usage.total_tokens}`;
 
-  process.stderr.write(`[tokens] Input: ${promptPart}${cachePart}, Output: ${outputPart}, Total: ${totalPart}\n`);
+  return ` [tokens: Input ${promptPart}${cachePart}, Output ${outputPart}, Total ${totalPart}]`;
+}
+
+function showTokenUsage(usage: TokenUsage | undefined): void {
+  const text = formatTokenUsage(usage);
+  if (!text) return;
+  process.stderr.write(`[tokens]${text}\n`);
 }
 
 function makePanelProgress(panel: MissionPanel, agentId: string, taskLabel: string = "Processing"): (message: string | undefined) => void {
