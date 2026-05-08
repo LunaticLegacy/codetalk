@@ -649,7 +649,9 @@ export async function execution(options: CliOptions): Promise<void> {
   // Phase 3: Apply all changes — backup, validate, write
   const backupDir = createBackupDir(options.cwd);
   const projectRoot = resolve(options.cwd);
-  const manifest = [];
+  const manifest: Array<{
+    filePath: string; existed: boolean; backupPath: string | null; action: string
+  }> = [];
 
   panel.add("apply", "Backing up originals...");
 
@@ -659,17 +661,18 @@ export async function execution(options: CliOptions): Promise<void> {
 
     if (!target.startsWith(projectRoot)) {
       panel.update("apply", "Skipped " + r.filePath + ": outside project root");
-      manifest.push({ filePath: r.filePath, backedUp: false, action: "skipped" });
+      manifest.push({ filePath: r.filePath, existed: false, backupPath: null, action: "skipped" });
       continue;
     }
 
-    let backedUp = false;
-    if (existsSync(target)) {
-      const bakRel = normalizePath(relative(options.cwd, target));
-      const bakDest = join(backupDir, bakRel.replace(/[^a-zA-Z0-9._\/-]/g, "_"));
+    const bakRel = normalizePath(relative(options.cwd, target));
+    const existed = existsSync(target);
+    let backupPath: string | null = null;
+    if (existed) {
+      backupPath = bakRel;
+      const bakDest = join(backupDir, bakRel);
       ensureParentDirectory(bakDest);
       copyFileSync(target, bakDest);
-      backedUp = true;
     }
 
     if (r.filePath.endsWith(".py") && r.action !== "modified") {
@@ -681,13 +684,13 @@ export async function execution(options: CliOptions): Promise<void> {
         panel.update("apply", "Syntax OK: " + r.filePath);
       } catch {
         panel.update("apply", "FAIL: syntax error in " + r.filePath + ", skipping");
-        manifest.push({ filePath: r.filePath, backedUp, action: "skipped (syntax error)" });
+        manifest.push({ filePath: r.filePath, existed: false, backupPath: null, action: "skipped (syntax error)" });
         continue;
       }
     }
 
     validated.push(r);
-    manifest.push({ filePath: r.filePath, backedUp, action: r.action });
+    manifest.push({ filePath: r.filePath, existed, backupPath, action: r.action });
   }
 
   let changedCount = 0;
@@ -710,13 +713,9 @@ export async function execution(options: CliOptions): Promise<void> {
         });
         changedCount++;
         panel.update("apply", "✓ " + r.filePath);
-      } catch {
-        // Git apply failed — try full file write as fallback
-        panel.update("apply", "Diff failed, falling back to full write: " + r.filePath + "...");
-        ensureParentDirectory(target);
-        writeFileSync(target, stripCodeFence(r.newContent), "utf8");
-        changedCount++;
-        panel.update("apply", "✓ " + r.filePath + " (full write)");
+      } catch (applyError: unknown) {
+        const errMsg = applyError instanceof Error ? applyError.message : String(applyError);
+        fail("git apply failed for " + r.filePath + ": " + errMsg.slice(0, 500));
       }
     } else {
       // New file — write full content
@@ -856,26 +855,59 @@ export function listBackups(cwd: string): Array<{ dir: string; created: string }
 export function rollbackTo(cwd: string, backupId: string): void {
   const src = join(cwd, BACKUP_ROOT, backupId);
   if (!existsSync(src)) {
-    fail(`Backup not found: ${backupId}. Run "codetalk rollback --list" to see available backups.`);
+    fail("Backup not found: " + backupId + ". Run codetalk rollback --list to see available backups.");
   }
 
-  const restored: string[] = [];
-  for (const entry of readdirSync(src, { withFileTypes: true })) {
-    if (entry.isFile() && entry.name !== ".backup-manifest") {
-      const originalPath = join(cwd, entry.name);
-      ensureParentDirectory(originalPath);
-      copyFileSync(join(src, entry.name), originalPath);
-      restored.push(entry.name);
+  const manifestPath = join(src, "manifest.json");
+  if (existsSync(manifestPath)) {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+      createdAt: string; repoRoot: string;
+      files: Array<{ filePath: string; existed: boolean; backupPath: string | null }>;
+    };
+    const restored: string[] = [];
+    const deleted: string[] = [];
+    for (const f of manifest.files) {
+      const targetPath = join(cwd, f.filePath);
+      if (f.existed && f.backupPath) {
+        const bakSrc = join(src, f.backupPath);
+        if (existsSync(bakSrc)) {
+          ensureParentDirectory(targetPath);
+          copyFileSync(bakSrc, targetPath);
+          restored.push(f.filePath);
+        }
+      } else if (!f.existed) {
+        if (existsSync(targetPath)) {
+          try { rmSync(targetPath); } catch {}
+          deleted.push(f.filePath);
+        }
+      }
     }
+    const rCount = restored.length;
+    const dCount = deleted.length;
+    console.log("Restored " + rCount + " file" + (rCount === 1 ? "" : "s") + ", deleted " + dCount + " file" + (dCount === 1 ? "" : "s") + " from backup " + backupId + ":");
+    for (const f of restored) console.log("  R " + f);
+    for (const f of deleted) console.log("  D " + f);
+  } else {
+    const restored: string[] = [];
+    function walk(dir: string, prefix: string): void {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          walk(join(dir, entry.name), prefix ? prefix + "/" + entry.name : entry.name);
+        } else if (entry.isFile() && entry.name !== ".backup-manifest" && entry.name !== "manifest.json") {
+          const relPath = prefix ? prefix + "/" + entry.name : entry.name;
+          const originalPath = join(cwd, relPath);
+          ensureParentDirectory(originalPath);
+          copyFileSync(join(dir, entry.name), originalPath);
+          restored.push(relPath);
+        }
+      }
+    }
+    walk(src, "");
+    const rCount = restored.length;
+    console.log("Restored " + rCount + " file" + (rCount === 1 ? "" : "s") + " from backup " + backupId + ":");
+    for (const f of restored) console.log("  R " + f);
   }
-
-  console.log(`Restored ${restored.length} file${restored.length === 1 ? "" : "s"} from backup ${backupId}:`);
-  for (const f of restored) {
-    console.log(`  R ${f}`);
-  }
-}
-
-// ── Architecture scan (coordinator + reviewers + merger) ─────────────────────
+}// ── Architecture scan (coordinator + reviewers + merger) ─────────────────────
 
 export async function runArchitectureScan(options: CliOptions, report: ScanReport): Promise<string> {
   const panel = new MissionPanel();
