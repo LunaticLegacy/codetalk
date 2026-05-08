@@ -5,6 +5,7 @@ import { dirname, join, relative, resolve } from "node:path";
 
 import type { CliOptions, CodetalkerConfig, ScanReport, SourceFile, SourceSummary } from "./types.js";
 import { DEFAULT_API_URL, DEFAULT_MAP_PATH, DEFAULT_MODEL, DEFAULT_PLAN_PATH, SOURCE_EXTENSIONS, IGNORED_DIRS, COMMANDS } from "./constants.js";
+import { loadIndex } from "./indexer.js";
 
 // ── File collection ───────────────────────────────────────────────────────────
 
@@ -512,6 +513,20 @@ Agent checklist:
 }
 
 export function buildRepositoryEvidence(options: CliOptions, files: SourceFile[], includeProductFiles = true): string {
+  // When includeProductFiles is true and an index exists, use it to narrow the file list
+  if (includeProductFiles) {
+    const index = loadIndex(options.cwd);
+    if (index) {
+      // Use index file paths as the primary set, but also keep product files
+      const indexedPaths = new Set(Object.keys(index.files));
+      // Only include source files that are in the index
+      const filtered = files.filter((f) => indexedPaths.has(normalizePath(f.path)));
+      if (filtered.length > 0) {
+        files = filtered;
+      }
+    }
+  }
+
   const productFiles = [
     "package.json",
     "tsconfig.json",
@@ -733,6 +748,15 @@ export function replaceSection(markdown: string, heading: string, replacement: s
   }
 
   return markdown.trimEnd() + "\n\n" + replacement.trimEnd() + "\n";
+}
+
+export function hasGit(): boolean {
+  try {
+    execFileSync("git", ["--version"], { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function getChangedFiles(cwd: string): string[] {

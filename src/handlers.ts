@@ -40,6 +40,7 @@ import {
   ensureParentDirectory,
   fail,
   getChangedFiles,
+  hasGit,
   getExtension,
   maskSecret,
   normalizePath,
@@ -50,6 +51,7 @@ import {
   streamProgress,
   trimTrailingSlash
 } from "./utils.js";
+import { buildSymbolIndex, saveIndex } from "./indexer.js";
 import {
   DEFAULT_API_URL,
   DEFAULT_MODEL,
@@ -484,6 +486,12 @@ export async function scanRepo(options: CliOptions): Promise<void> {
   const result = await runArchitectureScan(options, report);
   writeSemanticMap(options, result);
   console.log(`Wrote LLM semantic map: ${normalizePath(relative(options.cwd, resolve(options.cwd, options.mapPath)))}`);
+
+  // Build and save symbol index after scan
+  streamProgress(options, "Building file symbol index...");
+  const index = buildSymbolIndex(options.cwd);
+  saveIndex(options.cwd, index);
+  console.log(`Indexed ${Object.keys(index.files).length} source files in .codetalk/index.json`);
 }
 
 // ── map ──────────────────────────────────────────────────────────────────────
@@ -628,6 +636,7 @@ export async function execution(options: CliOptions): Promise<void> {
     panel.add(`editor ${i + 1}`, `Waiting: ${fileSpecs[i].filePath}`);
   }
 
+  const useDiff = hasGit();
   const totalFiles = fileSpecs.length;
   const tasks = fileSpecs.map((spec, index) => async () => {
     const agentId = `editor ${index + 1}`;
@@ -638,7 +647,7 @@ export async function execution(options: CliOptions): Promise<void> {
     const fileContent = existsSync(filePath) ? readFileSync(filePath, "utf8") : "(new file)";
 
     panel.update(agentId, `Generating code for file ${fileNum}: ${spec.filePath} (change: ${spec.description})...`);
-    const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan, currentMap);
+    const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan, currentMap, useDiff && fileContent !== "(new file)");
     const editDetail = `File ${fileNum}: ${spec.filePath}`;
     const { content: rawContent, tokenStr: editorTokens } = await callChatCompletion(options, editorPrompt, panel, agentId, editDetail);
     const cleaned = stripCodeFence(rawContent);

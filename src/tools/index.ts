@@ -5,6 +5,7 @@ import { toolLs } from "./ls.js";
 import { toolGlob } from "./glob.js";
 import { toolStat } from "./stat.js";
 import { toolGitLog } from "./git_log.js";
+import { toolSearch } from "./search.js";
 
 export type { ToolArg, ToolDef, ToolResult } from "./types.js";
 export { toolRead } from "./read.js";
@@ -13,6 +14,7 @@ export { toolLs } from "./ls.js";
 export { toolGlob } from "./glob.js";
 export { toolStat } from "./stat.js";
 export { toolGitLog } from "./git_log.js";
+export { toolSearch } from "./search.js";
 
 export const ALL_TOOLS: ToolDef[] = [
   {
@@ -57,6 +59,13 @@ export const ALL_TOOLS: ToolDef[] = [
     args: [
       { name: "count", type: "number", description: "Number of commits to show (default: 10, max: 100)", required: false }
     ]
+  },
+  {
+    name: "search",
+    description: "Search the file index for symbols and filenames matching a query. Uses the pre-built symbol index (built during scan). Faster than grep for finding relevant files by concept.",
+    args: [
+      { name: "query", type: "string", description: "Search query to match against file exports, imports, and filenames", required: true }
+    ]
   }
 ];
 
@@ -68,7 +77,8 @@ const TOOL_IMPLS: Record<string, (args: Record<string, any>, cwd: string) => Too
   ls: toolLs,
   glob: toolGlob,
   stat: toolStat,
-  git_log: toolGitLog
+  git_log: toolGitLog,
+  search: toolSearch
 };
 
 export function executeTool(name: string, args: Record<string, any>, cwd: string): ToolResult {

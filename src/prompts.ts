@@ -175,25 +175,69 @@ export function createExecEditorPrompt(
   changeDescription: string,
   currentContent: string,
   plan: string,
-  currentMap: string
+  currentMap: string,
+  useDiff?: boolean
 ): string {
+  const isNew = currentContent === "(new file)";
+  if (isNew) {
+    return `You are Codetalker file editor.
+
+Goal:
+- Create a new file: ${filePath}
+- Return the COMPLETE new file content. Do NOT truncate or use placeholders.
+
+Change description:
+${changeDescription}
+
+Semantic map (project reference):
+${currentMap}
+
+Relevant excerpt from implementation plan:
+${plan}
+
+Return ONLY the complete new file content. No explanations, no markdown fences.`;
+  }
+
+  if (useDiff) {
+    return `You are Codetalker file editor.
+
+Context:
+- Do NOT invent attributes, methods, function signatures, or import paths.
+
+Goal:
+- Modify ${filePath} according to the change description below.
+- Return a **unified diff** (diff -u format) showing only the changed lines.
+- Example:
+--- a/${filePath}
++++ b/${filePath}
+@@ -1,3 +1,4 @@
+ unchanged-line
+-old-line
++new-line
+
+Change description:
+${changeDescription}
+
+Original content of ${filePath} for reference:
+${currentContent}
+
+Relevant excerpt from implementation plan:
+${plan}
+
+Return ONLY the unified diff. No markdown fences.`;
+  }
+
   return `You are Codetalker file editor.
 
 Context:
-- This file is part of a larger project. The semantic map below describes the project's types, classes, modules, and functions.
-- BEFORE writing code that references symbols (classes, functions, attributes, imports) from OTHER files in the project, check the semantic map to verify those symbols exist.
-- Do NOT invent attributes, methods, function signatures, or import paths — only use what is confirmed in the semantic map or the actual file content below.
+- Do NOT invent attributes, methods, function signatures, or import paths.
 
 Goal:
 - Modify the file ${filePath} according to the change description below.
 - Return the COMPLETE new file content. Do NOT truncate or use placeholders.
 - Preserve all existing code that does not need to change.
-- If the file is new (no existing content), create it from scratch.
 
-Semantic map (project reference):
-${currentMap}
-
-Change description for ${filePath}:
+Change description:
 ${changeDescription}
 
 Original content of ${filePath}:
@@ -202,7 +246,7 @@ ${currentContent}
 Relevant excerpt from implementation plan:
 ${plan}
 
-Return ONLY the complete new file content. No explanations, no markdown fences.`;
+Return ONLY the complete new file content. No markdown fences.`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
