@@ -173,8 +173,8 @@ Requirements:
     await runPrompt(options, prompt);
     panel.done("ask", "Response streamed");
   } else {
-    const answer = await callChatCompletion(options, prompt, panel, "ask", "Answering question");
-    panel.done("ask", `Complete (${answer.length} chars)`);
+    const { content: answer, tokenStr: askTokens } = await callChatCompletion(options, prompt, panel, "ask", "Answering question");
+    panel.done("ask", `Complete (${answer.length} chars)${askTokens}`);
     panel.finish();
     console.log(answer);
   }
@@ -258,7 +258,7 @@ export async function execution(options: CliOptions): Promise<void> {
 
   // Phase 1: Coordinator extracts affected files and change specs
   const coordinatorPrompt = createExecCoordPrompt(plan, currentMap, options);
-  const coordinatorResult = await callChatCompletion(options, coordinatorPrompt, panel, "coordinator", "Analyzing plan");
+  const { content: coordinatorResult } = await callChatCompletion(options, coordinatorPrompt, panel, "coordinator", "Analyzing plan");
 
   const fileSpecs = parseExecChangeSpecs(coordinatorResult);
   if (fileSpecs.length === 0) {
@@ -284,8 +284,8 @@ export async function execution(options: CliOptions): Promise<void> {
     panel.update(agentId, `Asking LLM for file ${fileNum}: ${spec.filePath}...`);
     const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan, currentMap);
     const editDetail = `File ${fileNum}: ${spec.filePath}`;
-    let newContent = await callChatCompletion(options, editorPrompt, panel, agentId, editDetail);
-    newContent = stripCodeFence(newContent);
+    const { content: rawContent } = await callChatCompletion(options, editorPrompt, panel, agentId, editDetail);
+    const newContent = stripCodeFence(rawContent);
 
     return {
       filePath: spec.filePath,
@@ -388,8 +388,9 @@ ${inspectionPlan}
 Per-file analyses:
 ${perFileAnalyses}`;
 
-  const result = sanitizeMarkdownMap(await callChatCompletion(options, prompt, panel, "merger", "Synthesizing map"));
-  panel.done("merger", "Semantic map generated");
+  const { content: mapResult, tokenStr: mergerTokens } = await callChatCompletion(options, prompt, panel, "merger", "Synthesizing map");
+  const result = sanitizeMarkdownMap(mapResult);
+  panel.done("merger", `Semantic map generated${mergerTokens}`);
   panel.finish();
 
   // Clean up temp directory
@@ -420,7 +421,8 @@ ${formatScan(report)}
 All source files:
 ${report.files.map((file) => `- ${file.path} (${file.language}, ${file.bytes} bytes)`).join("\n") || "- No source files detected."}`;
 
-  return callChatCompletion(options, prompt, panel, panel ? "coordinator" : undefined, panel ? "Planning inspection" : undefined);
+  const { content: planContent } = await callChatCompletion(options, prompt, panel, panel ? "coordinator" : undefined, panel ? "Planning inspection" : undefined);
+  return planContent;
 }
 
 export async function runReviewerAgents(options: CliOptions, chunks: SourceFile[][], inspectionPlan: string, panel?: MissionPanel): Promise<{ tmpDir: string; analysisFiles: string[] }> {
@@ -460,7 +462,7 @@ File: ${file.path} (${file.language}, ${file.bytes} bytes)
 
 \`\`\`\n${content}\n\`\`\``;
 
-      const analysis = await callChatCompletion(options, prompt, panel, agentId, `File ${fileNum}: ${file.path}`);
+      const { content: analysis } = await callChatCompletion(options, prompt, panel, agentId, `File ${fileNum}: ${file.path}`);
 
       const tmpPath = join(tmpDir, `reviewer-${index + 1}-file-${fi}-${sanitizePath(file.path)}.md`);
       writeFileSync(tmpPath, analysis, "utf8");

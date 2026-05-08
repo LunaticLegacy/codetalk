@@ -4,7 +4,7 @@ import { trimTrailingSlash, fail, readConfig } from "./utils.js";
 
 // ── Chat completion (non-streaming) ──────────────────────────────────────────
 
-export async function callChatCompletion(options: CliOptions, prompt: string, panel?: MissionPanel, agentId?: string, detail?: string): Promise<string> {
+export async function callChatCompletion(options: CliOptions, prompt: string, panel?: MissionPanel, agentId?: string, detail?: string): Promise<{ content: string; tokenStr: string }> {
   const config = readConfig(options);
   const endpoint = `${trimTrailingSlash(config.apiUrl)}/chat/completions`;
   const progress = panel && agentId
@@ -58,8 +58,8 @@ Treat CODEMAP.md as the current behavioral contract unless source inspection pro
       fail("API response did not include choices[0].message.content.");
     }
 
-    progress("Model response received." + formatTokenUsage(payload.usage));
-    return content!;
+    progress("Model response received.");
+    return { content: content!, tokenStr: formatTokenUsage(payload.usage) };
   } finally {
     progress(undefined);
   }
@@ -265,5 +265,5 @@ export async function runPromptCapture(options: CliOptions, prompt: string, pane
     return streamChatCompletion(options, prompt);
   }
 
-  return callChatCompletion(options, prompt, panel, agentId, detail);
+  return (await callChatCompletion(options, prompt, panel, agentId, detail)).content;
 }
