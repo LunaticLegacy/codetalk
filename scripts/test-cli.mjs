@@ -149,8 +149,8 @@ async function testLlmMapWrite() {
     assertIncludes(stderr, "[coordinator] Inspection plan ready", "scan --write shows coordinator progress on stderr");
     assertIncludes(stderr, "[reviewer ", "scan --write shows reviewer progress on stderr");
     assertIncludes(stderr, "[merger] Semantic map generated", "scan --write shows merger progress on stderr");
-    assertEqual(bodies.length, 4, "scan --write calls coordinator, two reviewers, and merger");
-    assertIncludes(bodies.join("\n"), "reviewer agent", "scan --write sends reviewer prompts");
+    assertEqual(bodies.length, 5, "scan --write calls coordinator, each file individually, then merger");
+    assertIncludes(bodies.join("\n"), "file analyzer", "scan --write sends file analysis prompts");
     assertIncludes(read(join(fixture, "CODEMAP.md")), "LLM Architecture", "scan --write lands architecture");
   }, { stream: false });
 }
