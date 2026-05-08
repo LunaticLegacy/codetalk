@@ -11,14 +11,12 @@ import { callChatCompletion, callWithTools, runPrompt, runPromptCapture } from "
 import { ALL_TOOLS } from "./tools/index.js";
 import {
   askSystemPrompt,
-  askStreamingPrompt,
   buildAgentPrompt as promptsBuildAgentPrompt,
   buildInspectionPlanPrompt,
   createExecCoordPrompt,
   createExecEditorPrompt,
   gatekeeperPrompt,
   mergerPrompt,
-  planStreamingPrompt,
   planSystemPrompt,
   retryEditorPrompt,
   reviewerPrompt,
@@ -541,17 +539,10 @@ export async function askCodebase(options: CliOptions): Promise<void> {
   const panel = new MissionPanel();
   panel.add("ask", "Exploring codebase with tools...");
 
-  if (options.stream) {
-    // Streaming: use old direct prompt (tools not suitable for streaming)
-    const prompt = askStreamingPrompt(map, options.mapPath, question);
-    await runPrompt(options, prompt);
-    panel.done("ask", "Response streamed");
-  } else {
-    const answer = await callWithTools(options, askSystemPrompt(map, options.mapPath), question, ALL_TOOLS, panel, "ask");
-    panel.done("ask", `Complete (${answer.length} chars)`);
-    panel.finish();
-    console.log(answer);
-  }
+  const answer = await callWithTools(options, askSystemPrompt(map, options.mapPath), question, ALL_TOOLS, panel, "ask");
+  panel.done("ask", `Complete (${answer.length} chars)`);
+  panel.finish();
+  console.log(answer);
 }
 
 // ── plan ─────────────────────────────────────────────────────────────────────
@@ -561,18 +552,6 @@ export async function planChange(options: CliOptions): Promise<void> {
 
   const map = readMapForContext(options);
   const panel = new MissionPanel();
-
-  if (options.stream) {
-    // Streaming: use old prompt path (tools not suitable for streaming)
-    panel.add("plan", "Generating implementation plan...");
-    const prompt = planStreamingPrompt(map, request);
-    const plan = await runPromptCapture(options, prompt, panel, "plan");
-    writePlan(options, plan);
-    panel.done("plan", `Plan written to ${options.outPath}`);
-    panel.finish();
-    console.log(`Wrote plan: ${normalizePath(relative(options.cwd, resolve(options.cwd, options.outPath)))}`);
-    return;
-  }
 
   panel.add("plan", "Exploring codebase with tools...");
   const plan = await callWithTools(options, planSystemPrompt(map), request, ALL_TOOLS, panel, "plan");

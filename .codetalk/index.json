@@ -1,0 +1,325 @@
+{
+  "files": {
+    "scripts/test-cli.mjs": {
+      "exports": [
+        "add",
+        "worker",
+        "Server"
+      ],
+      "imports": [
+        "node:child_process",
+        "node:fs",
+        "node:http",
+        "node:os",
+        "node:path",
+        "node:util",
+        "node:url"
+      ],
+      "size": 10117,
+      "language": "JavaScript"
+    },
+    "src/api.ts": {
+      "exports": [
+        "flushStreamEvents",
+        "formatTokenUsage",
+        "showTokenUsage",
+        "makePanelProgress",
+        "startModelProgress",
+        "parseToolCall"
+      ],
+      "imports": [
+        "./panel.js",
+        "./utils.js",
+        "./tools/index.js",
+        "./prompts.js"
+      ],
+      "size": 16663,
+      "language": "TypeScript"
+    },
+    "src/constants.ts": {
+      "exports": [
+        "DEFAULT_MAP_PATH",
+        "DEFAULT_PLAN_PATH",
+        "DEFAULT_MODEL",
+        "DEFAULT_API_URL",
+        "PROVIDERS",
+        "ProviderId",
+        "COMMANDS",
+        "SOURCE_EXTENSIONS",
+        "IGNORED_DIRS",
+        "printVersion",
+        "printSubcommandHelp",
+        "printHelp"
+      ],
+      "imports": [
+        "node:fs"
+      ],
+      "size": 8393,
+      "language": "TypeScript"
+    },
+    "src/handlers.ts": {
+      "exports": [
+        "initMap",
+        "writeMap",
+        "checkMap",
+        "listBackups",
+        "rollbackTo",
+        "writeSemanticMap",
+        "writePlan",
+        "sanitizeMarkdownMap",
+        "buildAgentPrompt",
+        "parseExecChangeSpecs"
+      ],
+      "imports": [
+        "node:fs",
+        "node:child_process",
+        "node:os",
+        "node:path",
+        "node:readline",
+        "node:readline/promises",
+        "./panel.js",
+        "./api.js",
+        "./tools/index.js",
+        "./prompts.js",
+        "./utils.js",
+        "./indexer.js",
+        "./constants.js"
+      ],
+      "size": 43467,
+      "language": "TypeScript"
+    },
+    "src/index.ts": {
+      "exports": [],
+      "imports": [
+        "./constants.js",
+        "./handlers.js",
+        "./utils.js"
+      ],
+      "size": 2204,
+      "language": "TypeScript"
+    },
+    "src/indexer.ts": {
+      "exports": [
+        "SymbolIndex",
+        "FileSymbols",
+        "buildSymbolIndex",
+        "searchIndex",
+        "saveIndex",
+        "loadIndex",
+        "Foo"
+      ],
+      "imports": [
+        "node:child_process",
+        "node:fs",
+        "node:path",
+        "./constants.js",
+        "./utils.js",
+        "module"
+      ],
+      "size": 7325,
+      "language": "TypeScript"
+    },
+    "src/panel.ts": {
+      "exports": [
+        "MissionPanel"
+      ],
+      "imports": [],
+      "size": 2632,
+      "language": "TypeScript"
+    },
+    "src/prompts.ts": {
+      "exports": [
+        "systemPrompt",
+        "buildToolDefinitions",
+        "askSystemPrompt",
+        "askStreamingPrompt",
+        "planSystemPrompt",
+        "planStreamingPrompt",
+        "createExecCoordPrompt",
+        "createExecEditorPrompt",
+        "retryEditorPrompt",
+        "gatekeeperPrompt",
+        "semanticSyncPrompt",
+        "buildInspectionPlanPrompt",
+        "reviewerPrompt",
+        "mergerPrompt",
+        "buildAgentPrompt"
+      ],
+      "imports": [],
+      "size": 20489,
+      "language": "TypeScript"
+    },
+    "src/tools/git_log.ts": {
+      "exports": [
+        "toolGitLog"
+      ],
+      "imports": [
+        "node:child_process"
+      ],
+      "size": 705,
+      "language": "TypeScript"
+    },
+    "src/tools/glob.ts": {
+      "exports": [
+        "toolGlob"
+      ],
+      "imports": [
+        "node:fs",
+        "node:path",
+        "./shared.js"
+      ],
+      "size": 2794,
+      "language": "TypeScript"
+    },
+    "src/tools/grep.ts": {
+      "exports": [
+        "toolGrep"
+      ],
+      "imports": [
+        "node:child_process",
+        "node:fs",
+        "node:path",
+        "./shared.js",
+        "../indexer.js"
+      ],
+      "size": 5031,
+      "language": "TypeScript"
+    },
+    "src/tools/index.ts": {
+      "exports": [
+        "ALL_TOOLS",
+        "executeTool"
+      ],
+      "imports": [
+        "./read.js",
+        "./grep.js",
+        "./ls.js",
+        "./glob.js",
+        "./stat.js",
+        "./git_log.js",
+        "./search.js"
+      ],
+      "size": 3516,
+      "language": "TypeScript"
+    },
+    "src/tools/ls.ts": {
+      "exports": [
+        "toolLs"
+      ],
+      "imports": [
+        "node:fs",
+        "node:path"
+      ],
+      "size": 1221,
+      "language": "TypeScript"
+    },
+    "src/tools/read.ts": {
+      "exports": [
+        "toolRead"
+      ],
+      "imports": [
+        "node:fs",
+        "node:path"
+      ],
+      "size": 1651,
+      "language": "TypeScript"
+    },
+    "src/tools/search.ts": {
+      "exports": [
+        "toolSearch"
+      ],
+      "imports": [
+        "../indexer.js"
+      ],
+      "size": 976,
+      "language": "TypeScript"
+    },
+    "src/tools/shared.ts": {
+      "exports": [
+        "SKIP_DIRS",
+        "countLines"
+      ],
+      "imports": [],
+      "size": 198,
+      "language": "TypeScript"
+    },
+    "src/tools/stat.ts": {
+      "exports": [
+        "toolStat"
+      ],
+      "imports": [
+        "node:fs",
+        "node:path",
+        "./shared.js"
+      ],
+      "size": 1464,
+      "language": "TypeScript"
+    },
+    "src/tools/types.ts": {
+      "exports": [
+        "ToolArg",
+        "ToolDef",
+        "ToolResult"
+      ],
+      "imports": [],
+      "size": 234,
+      "language": "TypeScript"
+    },
+    "src/types.ts": {
+      "exports": [
+        "CliOptions",
+        "SourceFile",
+        "SourceSummary",
+        "ScanReport",
+        "CodetalkerConfig",
+        "TokenUsage"
+      ],
+      "imports": [],
+      "size": 1389,
+      "language": "TypeScript"
+    },
+    "src/utils.ts": {
+      "exports": [
+        "collectSourceFiles",
+        "summarize",
+        "buildScanReport",
+        "formatScan",
+        "configPath",
+        "tryReadConfig",
+        "readConfig",
+        "writeConfig",
+        "buildMap",
+        "buildTemplate",
+        "buildChangeSync",
+        "buildRepositoryEvidence",
+        "readMapForContext",
+        "normalizeParallel",
+        "parseOptions",
+        "splitFilesForAgents",
+        "requireMessage",
+        "trimTrailingSlash",
+        "maskSecret",
+        "streamProgress",
+        "taskProgress",
+        "streamLabeledProgress",
+        "replaceSection",
+        "hasGit",
+        "getChangedFiles",
+        "getExtension",
+        "normalizePath",
+        "ensureParentDirectory",
+        "fail"
+      ],
+      "imports": [
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "./constants.js",
+        "./indexer.js"
+      ],
+      "size": 25457,
+      "language": "TypeScript"
+    }
+  }
+}

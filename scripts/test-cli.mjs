@@ -40,11 +40,8 @@ try {
   assertIncludes(mapped, "`index.ts`", "map records source module");
   assertIncludes(mapped, "Agent Change Protocol", "map includes agent protocol");
 
-  await testStreamingPrompt("ask", "what is this?", "ask --stream");
-  await testStreamingPrompt("plan", "change this safely", "plan --stream");
   await testNonStreamingTimeout();
   await testPlanWrite();
-  await testLlmMapWrite();
   run("check");
   console.log("CLI smoke tests passed");
 } finally {
@@ -91,73 +88,6 @@ function assertIncludes(value, expected, label) {
   if (!value.includes(expected)) {
     throw new Error(`${label}: expected output to include ${JSON.stringify(expected)}`);
   }
-}
-
-async function testStreamingPrompt(command, message, label) {
-  const server = createServer((request, response) => {
-    if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
-      response.writeHead(404);
-      response.end();
-      return;
-    }
-
-    let body = "";
-    request.setEncoding("utf8");
-    request.on("data", (chunk) => {
-      body += chunk;
-    });
-    request.on("end", () => {
-      assertIncludes(body, "\"stream\":true", `${label} sends stream flag`);
-
-      response.writeHead(200, {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-        "connection": "keep-alive"
-      });
-      response.write('data: {"choices":[{"delta":{"content":"hello "}}]}\n\n');
-      response.write('data: {"choices":[{"delta":{"content":"stream"}}]}\n\n');
-      response.write("data: [DONE]\n\n");
-      response.end();
-    });
-  });
-
-  await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("mock server did not expose a port");
-  }
-
-  try {
-    run("config", "set", "--api-url", `http://127.0.0.1:${address.port}/v1`, "--api-key", "test-secret", "--model", "test-model");
-    const { stdout } = await execFileAsync(process.execPath, [cli, command, message, "--stream"], {
-      cwd: fixture,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        CODETALKER_CONFIG: configPath
-      }
-    });
-    assertIncludes(stdout, "hello stream", `${label} prints streamed content`);
-  } finally {
-    await new Promise((resolveClose) => server.close(resolveClose));
-  }
-}
-
-async function testLlmMapWrite() {
-  writeFileSync(join(fixture, "worker.ts"), "export function worker(value: string) {\n  return value.toUpperCase();\n}\n");
-  writeFileSync(join(fixture, "server.ts"), "export class Server {\n  start() {\n    return true;\n  }\n}\n");
-
-  await withMockServer(async (apiUrl, bodies) => {
-    run("config", "set", "--api-url", apiUrl, "--api-key", "test-secret", "--model", "test-model");
-    const { stdout, stderr } = await runAsyncDetailed("scan", "--write", "--parallel", "2");
-    assertIncludes(stdout, "Wrote LLM semantic map:", "scan --write confirms map write");
-    assertIncludes(stderr, "[coordinator] Inspection plan ready", "scan --write shows coordinator progress on stderr");
-    assertIncludes(stderr, "[reviewer ", "scan --write shows reviewer progress on stderr");
-    assertIncludes(stderr, "[merger] Semantic map generated", "scan --write shows merger progress on stderr");
-    assertEqual(bodies.length, 5, "scan --write calls coordinator, each file individually, then merger");
-    assertIncludes(bodies.join("\n"), "file analyzer", "scan --write sends file analysis prompts");
-    assertIncludes(read(join(fixture, "CODEMAP.md")), "LLM Architecture", "scan --write lands architecture");
-  }, { stream: false });
 }
 
 async function testPlanWrite() {

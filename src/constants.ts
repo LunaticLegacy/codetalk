@@ -248,9 +248,7 @@ User guide:
   Need larger repo scan       codetalk scan --parallel 8
   Need a semantic map         codetalk map
   Need to ask about code      codetalk ask "question"
-  Need streaming answers      codetalk ask "question" --stream
   Need a change plan          codetalk plan "request"
-  Need streaming plans        codetalk plan "request" --stream
   Need to execute a plan     codetalk exec
   Need parallel execution    codetalk exec --parallel 8
   Need CI freshness checks    codetalk check
