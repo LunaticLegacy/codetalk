@@ -104,7 +104,13 @@ export const IGNORED_DIRS = new Set([
   ".nuxt",
   ".turbo",
   ".cache",
-  "vendor"
+  "vendor",
+  "venv",
+  "env",
+  "__pycache__",
+  ".mypy_cache",
+  ".pytest_cache",
+  "htmlcov"
 ]);
 
 export function printVersion(): void {
