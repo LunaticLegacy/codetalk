@@ -23,7 +23,13 @@
 
 ---
 
-codetalk-cli is a CLI tool that maintains a project-local `CODEMAP.md` — a living semantic contract for AI coding agents. An agent reads the map to understand architecture, plans changes using it, then syncs the real behavior back after editing.
+codetalk is a CLI tool that maintains a project-local `CODEMAP.md` — a living semantic contract for AI coding agents. An agent reads the map to understand architecture, plans changes using it, then syncs the real behavior back after editing.
+
+Install globally, then run `codetalk` (or `codetalk-cli`):
+
+```bash
+npm install -g codetalk-cli
+```
 
 This is not a documentation generator. The document is not the endpoint; it is the semantic basis for the next code change.
 
@@ -40,47 +46,40 @@ This is not a documentation generator. The document is not the endpoint; it is t
 ## Install
 
 ```bash
-npm install -D codetalk-cli
+npm install -g codetalk-cli
 ```
 
-No other dependencies. Node.js 18+ required.
+Or use it on the fly without installing:
+
+```bash
+npx codetalk-cli init
+```
+
+Node.js 18+ required.
 
 ## Quick Start
 
 ```bash
-# Initialize a semantic map
-npx codetalk-cli init
+# 1. Initialize a semantic map for your project
+codetalk init
 
-# Configure your LLM API
-npx codetalk-cli config set --api-url https://api.openai.com/v1 --api-key sk-xxx --model gpt-4.1
+# 2. Point it at your LLM
+codetalk config set --api-url https://api.openai.com/v1 --api-key sk-xxx --model gpt-4.1
 
-# Scan your codebase with parallel LLM reviewers
-npx codetalk-cli scan --write
+# 3. Scan and map your codebase in one shot
+codetalk scan --write
 
-# Ask a question about your code
-npx codetalk-cli ask "How does authentication work?" --stream
+# 4. Ask questions about your code
+codetalk ask "How does authentication work?"
 
-# Generate a change plan
-npx codetalk-cli plan "Add rate limiting to the API" --stream
+# 5. Generate a plan for a change
+codetalk plan "Add rate limiting"
 
-# Execute the plan (applies file changes in parallel)
-npx codetalk-cli exec --parallel 4
+# 6. Execute the plan (applies file changes in parallel)
+codetalk exec
 
-# Refresh the semantic map after edits
-npx codetalk-cli sync
-```
-
-### First Run
-
-```bash
-npx codetalk-cli init
-npx codetalk-cli config
-```
-
-Or non-interactively:
-
-```bash
-npx codetalk-cli config set --api-url https://api.openai.com/v1 --api-key sk-xxx --model gpt-4.1
+# 7. Sync the map after editing
+codetalk sync
 ```
 
 Config is stored at `~/.codetalker/config.json`. Environment variables are also supported:
@@ -93,7 +92,7 @@ CODETALKER_MODEL=gpt-4.1
 
 ## How It Works
 
-codetalk-cli orchestrates multiple LLM agents per operation, each with its own progress line displayed on stderr:
+codetalk orchestrates multiple LLM agents per operation, each with its own progress line displayed on stderr:
 
 ```
 ✓ coordinator: Building file inspection plan (coordinator)...
@@ -160,7 +159,7 @@ After each API call, token usage is displayed on stderr:
 
 ## API Compatibility
 
-codetalk-cli uses OpenAI-compatible `/chat/completions`:
+codetalk uses OpenAI-compatible `/chat/completions`:
 
 ```
 POST {apiUrl}/chat/completions
