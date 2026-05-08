@@ -2,6 +2,8 @@ import type { CliOptions, TokenUsage } from "./types.js";
 import { MissionPanel } from "./panel.js";
 import { trimTrailingSlash, fail, readConfig } from "./utils.js";
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 180_000;
+
 // ── Chat completion (non-streaming) ──────────────────────────────────────────
 
 export async function callChatCompletion(options: CliOptions, prompt: string, panel?: MissionPanel, agentId?: string, detail?: string): Promise<{ content: string; tokenStr: string }> {
@@ -10,6 +12,9 @@ export async function callChatCompletion(options: CliOptions, prompt: string, pa
   const progress = panel && agentId
     ? makePanelProgress(panel, agentId, `Calling ${config.model}`, detail)
     : startModelProgress(config.model, endpoint);
+  const timeoutMs = readRequestTimeoutMs();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(endpoint, {
@@ -18,6 +23,7 @@ export async function callChatCompletion(options: CliOptions, prompt: string, pa
         "content-type": "application/json",
         "authorization": `Bearer ${config.apiKey}`
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model: config.model,
         messages: [
@@ -41,6 +47,8 @@ Treat CODEMAP.md as the current behavioral contract unless source inspection pro
         ],
         temperature: 0.2
       })
+    }).catch((error: unknown) => {
+      fail(formatRequestFailure(error, endpoint, timeoutMs));
     });
 
     if (!response.ok) {
@@ -49,7 +57,9 @@ Treat CODEMAP.md as the current behavioral contract unless source inspection pro
     }
 
     progress("Reading model response.");
-    const payload = await response.json() as {
+    const payload = await response.json().catch((error: unknown) => {
+      fail(formatRequestFailure(error, endpoint, timeoutMs));
+    }) as {
       choices?: Array<{ message?: { content?: string } }>;
       usage?: TokenUsage;
     };
@@ -61,6 +71,7 @@ Treat CODEMAP.md as the current behavioral contract unless source inspection pro
     progress("Model response received.");
     return { content: content!, tokenStr: formatTokenUsage(payload.usage) };
   } finally {
+    clearTimeout(timeout);
     progress(undefined);
   }
 }
@@ -263,4 +274,22 @@ export async function runPromptCapture(options: CliOptions, prompt: string, pane
   }
 
   return (await callChatCompletion(options, prompt, panel, agentId, detail)).content;
+}
+
+function readRequestTimeoutMs(): number {
+  const parsed = Number.parseInt(process.env.CODETALKER_TIMEOUT_MS ?? "", 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+
+  return DEFAULT_REQUEST_TIMEOUT_MS;
+}
+
+function formatRequestFailure(error: unknown, endpoint: string, timeoutMs: number): string {
+  if (error instanceof Error && error.name === "AbortError") {
+    return `API request timed out after ${timeoutMs}ms: ${endpoint}\nSet CODETALKER_TIMEOUT_MS to adjust the timeout.`;
+  }
+
+  const detail = error instanceof Error ? error.message : String(error);
+  return `API request failed before receiving a response: ${endpoint}\n${detail}`;
 }

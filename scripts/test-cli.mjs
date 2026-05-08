@@ -41,6 +41,7 @@ try {
 
   await testStreamingPrompt("ask", "what is this?", "ask --stream");
   await testStreamingPrompt("plan", "change this safely", "plan --stream");
+  await testNonStreamingTimeout();
   await testPlanWrite();
   await testLlmMapWrite();
   run("check");
@@ -66,12 +67,17 @@ async function runAsync(...args) {
 }
 
 async function runAsyncDetailed(...args) {
+  return runAsyncDetailedWithEnv({}, ...args);
+}
+
+async function runAsyncDetailedWithEnv(extraEnv, ...args) {
   return execFileAsync(process.execPath, [cli, ...args], {
     cwd: fixture,
     encoding: "utf8",
     env: {
       ...process.env,
-      CODETALKER_CONFIG: configPath
+      CODETALKER_CONFIG: configPath,
+      ...extraEnv
     }
   });
 }
@@ -160,6 +166,39 @@ async function testPlanWrite() {
     assertIncludes(output, "Wrote plan: plans/next.md", "plan confirms plan write");
     assertIncludes(read(join(fixture, "plans", "next.md")), "LLM Architecture", "plan lands returned plan content");
   }, { stream: false });
+}
+
+async function testNonStreamingTimeout() {
+  const server = createServer((request, response) => {
+    if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+
+    request.resume();
+    // Intentionally leave the response open so the client timeout path is exercised.
+  });
+
+  await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("mock server did not expose a port");
+  }
+
+  try {
+    run("config", "set", "--api-url", `http://127.0.0.1:${address.port}/v1`, "--api-key", "test-secret", "--model", "test-model");
+    try {
+      await runAsyncDetailedWithEnv({ CODETALKER_TIMEOUT_MS: "25" }, "ask", "will timeout");
+      throw new Error("ask timeout test should have failed");
+    } catch (error) {
+      const stderr = error && typeof error === "object" && "stderr" in error ? String(error.stderr) : String(error);
+      assertIncludes(stderr, "API request timed out after 25ms", "non-streaming request reports timeout");
+      assertIncludes(stderr, "CODETALKER_TIMEOUT_MS", "timeout message names override env var");
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+  }
 }
 
 async function withMockServer(callback, options) {

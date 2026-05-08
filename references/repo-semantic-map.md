@@ -74,12 +74,14 @@ map is a working contract for agentic code modification.
 - `buildAgentPrompt(options, taskInstruction, userMessage)`: combines the semantic map, repo scan, and user request for API-backed commands.
 - `runPrompt(options, prompt)`: dispatches prompt execution to streaming or non-streaming chat completion and prints user-facing output.
 - `runPromptCapture(options, prompt)`: dispatches prompt execution and returns generated text, allowing LLM-backed scan and sync to write model output.
-- `callChatCompletion(options, prompt)`: calls an OpenAI-compatible `/chat/completions` endpoint and emits non-streaming progress to stderr while waiting for the model.
+- `callChatCompletion(options, prompt)`: calls an OpenAI-compatible `/chat/completions` endpoint with an AbortController timeout, emits non-streaming progress to stderr while waiting for the model, and reports timeout/network failures with provider-oriented error messages.
 - `streamChatCompletion(options, prompt)`: calls an OpenAI-compatible streaming `/chat/completions` endpoint, writes content deltas as they arrive, and returns the full streamed content.
 - `flushStreamEvents(buffer)`: parses buffered SSE `data:` events, prints `choices[0].delta.content`, and returns emitted content plus incomplete remainder text.
 - `sanitizeMarkdownMap(markdown)`: unwraps fenced markdown responses and fails if the model did not return a heading-started markdown map.
 - `readMapForContext(options)`: reads the configured map file or fails when it is missing.
 - `readConfig(options)`: resolves API config from CLI flags, environment variables, or local config file.
+- `readRequestTimeoutMs()`: reads `CODETALKER_TIMEOUT_MS` as a positive integer timeout for non-streaming LLM requests, defaulting to 180000 ms.
+- `formatRequestFailure(error, endpoint, timeoutMs)`: formats timeout and pre-response network failures with endpoint and timeout guidance.
 - `tryReadConfig()`: reads valid local config if present.
 - `writeConfig(config)`: writes config JSON with restrictive file mode where supported.
 - `configPath()`: resolves `CODETALKER_CONFIG` or `~/.codetalker/config.json`.
@@ -129,6 +131,7 @@ map is a working contract for agentic code modification.
 - `codetalker ask --stream` and `codetalker plan --stream` keep an HTTP response stream open and write incremental output to stdout.
 - `codetalker scan --llm --stream` and `codetalker sync --llm --stream` keep an HTTP response stream open and write incremental model output to stdout.
 - Non-streaming LLM calls write start, wait, elapsed-time, response-read, and completion progress to stderr so long-running commands do not appear hung.
+- Non-streaming LLM calls time out after `CODETALKER_TIMEOUT_MS` or 180000 ms by default; timeout errors name the endpoint and the override variable.
 - `codetalker sync --stream` writes local progress lines to stdout.
 - `codetalker sync` and `codetalker sync --llm` update semantic maps from observed repository changes; they do not execute plans or edit code.
 - `codetalker check` exits nonzero when the semantic map is missing or stale.
