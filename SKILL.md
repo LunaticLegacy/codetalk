@@ -73,25 +73,25 @@ the implementation changes behavior.
 - Update the semantic markdown in the same turn.
 - Reflect changed function behavior, signatures, side effects, and data flow.
 - If a change affects public APIs, note the compatibility impact explicitly.
-- If the CLI is available, use `codetalk sync` to refresh the change-sync checklist.
+- If the CLI is available, use `codetalk-cli sync` to refresh the change-sync checklist.
 
 ## CLI Surface
 
-- `codetalk init`: create a semantic map template.
-- `codetalk config`: manually enter and store API URL, API key, and model.
-- `codetalk scan`: inspect source files and print a compact repository inventory.
-- `codetalk scan --llm --write`: list all source files, ask a coordinator agent for an inspection plan, run parallel reviewer agents over file shards, merge their outputs, and write a complete semantic map.
-- `codetalk map`: generate a baseline semantic map from repository structure.
-- `codetalk ask`: answer codebase questions using the semantic map and repository scan as context.
-- `codetalk plan`: generate implementation plans from the semantic map without modifying files.
-- `codetalk plan --write --out CODEPLAN.md`: write a generated implementation plan to disk.
-- `codetalk sync`: record changed files and refresh the map's sync checklist.
-- `codetalk sync --llm`: call the configured LLM to update the complete semantic map from changed files.
-- `codetalk check`: fail when the map is missing or older than source files.
+- `codetalk-cli init`: create a semantic map template.
+- `codetalk-cli config`: manually enter and store API URL, API key, and model.
+- `codetalk-cli scan`: inspect source files and print a compact repository inventory.
+- `codetalk-cli scan --llm --write`: list all source files, ask a coordinator agent for an inspection plan, run parallel reviewer agents over file shards, merge their outputs, and write a complete semantic map.
+- `codetalk-cli map`: generate a baseline semantic map from repository structure.
+- `codetalk-cli ask`: answer codebase questions using the semantic map and repository scan as context.
+- `codetalk-cli plan`: generate implementation plans from the semantic map without modifying files.
+- `codetalk-cli plan --write --out CODEPLAN.md`: write a generated implementation plan to disk.
+- `codetalk-cli sync`: record changed files and refresh the map's sync checklist.
+- `codetalk-cli sync --llm`: call the configured LLM to update the complete semantic map from changed files.
+- `codetalk-cli check`: fail when the map is missing or older than source files.
 
-The public user experience should consistently use `codetalk xxx`.
+The public user experience should consistently use `codetalk-cli xxx`.
 `code-semantic-sync` may remain as a package/bin compatibility alias, but user
-documentation should teach `codetalk`.
+documentation should teach `codetalk-cli`.
 Non-streaming LLM commands should still show progress on stderr so users know
 long-running work is active while stdout remains script-friendly.
 `sync` does not execute plans. `plan` creates reviewable instructions, future
@@ -102,25 +102,25 @@ behavior has actually changed.
 
 | User intent | Command | Output |
 | --- | --- | --- |
-| Show help | `codetalk help` | Commands and usage table |
-| Initialize a repo | `codetalk init` | `CODEMAP.md` |
-| Configure API | `codetalk config` | Local API URL, API key, and model config |
-| Configure API non-interactively | `codetalk config set --api-url URL --api-key KEY --model MODEL` | Local API config |
-| Show config | `codetalk config show` | Masked config summary |
-| Scan repo | `codetalk scan` | Source, command surface, config, semantic maps, CI, module roles |
-| LLM architecture scan | `codetalk scan --llm` | Complete semantic map text generated from repository evidence |
-| Land architecture on disk | `codetalk scan --llm --write` | Updated `CODEMAP.md` |
-| Parallel architecture scan | `codetalk scan --llm --write --parallel 8` | Eight reviewer agents inspect file shards before merge |
-| Generate map | `codetalk map` | Baseline `CODEMAP.md` from repo structure |
-| Ask about code | `codetalk ask "How does auth work?"` | Answer grounded in the map and repo shape |
-| Ask with streaming output | `codetalk ask "How does auth work?" --stream` | Incremental answer as tokens arrive |
-| Plan a change | `codetalk plan "Add magic-link login"` | Implementation plan, risks, verification steps |
-| Plan with streaming output | `codetalk plan "Add magic-link login" --stream` | Incremental plan as tokens arrive |
-| Write plan to disk | `codetalk plan "Add magic-link login" --write --out plans/auth.md` | Markdown implementation plan |
-| Sync after edits | `codetalk sync` | Updated change-sync section |
-| Stream sync progress | `codetalk sync --stream` | Local sync progress while the map is updated |
-| Sync semantics with LLM | `codetalk sync --llm --stream` | Full semantic map updated from changed files with progress output |
-| CI freshness check | `codetalk check` | Nonzero exit when the map is missing or stale |
+| Show help | `codetalk-cli help` | Commands and usage table |
+| Initialize a repo | `codetalk-cli init` | `CODEMAP.md` |
+| Configure API | `codetalk-cli config` | Local API URL, API key, and model config |
+| Configure API non-interactively | `codetalk-cli config set --api-url URL --api-key KEY --model MODEL` | Local API config |
+| Show config | `codetalk-cli config show` | Masked config summary |
+| Scan repo | `codetalk-cli scan` | Source, command surface, config, semantic maps, CI, module roles |
+| LLM architecture scan | `codetalk-cli scan --llm` | Complete semantic map text generated from repository evidence |
+| Land architecture on disk | `codetalk-cli scan --llm --write` | Updated `CODEMAP.md` |
+| Parallel architecture scan | `codetalk-cli scan --llm --write --parallel 8` | Eight reviewer agents inspect file shards before merge |
+| Generate map | `codetalk-cli map` | Baseline `CODEMAP.md` from repo structure |
+| Ask about code | `codetalk-cli ask "How does auth work?"` | Answer grounded in the map and repo shape |
+| Ask with streaming output | `codetalk-cli ask "How does auth work?" --stream` | Incremental answer as tokens arrive |
+| Plan a change | `codetalk-cli plan "Add magic-link login"` | Implementation plan, risks, verification steps |
+| Plan with streaming output | `codetalk-cli plan "Add magic-link login" --stream` | Incremental plan as tokens arrive |
+| Write plan to disk | `codetalk-cli plan "Add magic-link login" --write --out plans/auth.md` | Markdown implementation plan |
+| Sync after edits | `codetalk-cli sync` | Updated change-sync section |
+| Stream sync progress | `codetalk-cli sync --stream` | Local sync progress while the map is updated |
+| Sync semantics with LLM | `codetalk-cli sync --llm --stream` | Full semantic map updated from changed files with progress output |
+| CI freshness check | `codetalk-cli check` | Nonzero exit when the map is missing or stale |
 
 ## Output Contract
 

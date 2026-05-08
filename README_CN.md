@@ -16,14 +16,14 @@
 
 ---
 
-Codetalk 是一个维护项目本地 `CODEMAP.md` 的 CLI 工具 — 一份给 AI coding agent 使用的活语义契约。Agent 读取语义图理解架构，基于它规划修改，在改完代码后将真实行为同步回语义图。
+codetalk-cli 是一个维护项目本地 `CODEMAP.md` 的 CLI 工具 — 一份给 AI coding agent 使用的活语义契约。Agent 读取语义图理解架构，基于它规划修改，在改完代码后将真实行为同步回语义图。
 
 这不是一个文档生成器。文档不是终点，而是下一次修改的语义基础。
 
 ## 安装
 
 ```bash
-npm install -D codetalk
+npm install -D codetalk-cli
 ```
 
 无其他依赖。要求 Node.js 18+。
@@ -32,25 +32,25 @@ npm install -D codetalk
 
 ```bash
 # 初始化语义图
-npx codetalk init
+npx codetalk-cli init
 
 # 配置 LLM API
-npx codetalk config set --api-url https://api.openai.com/v1 --api-key sk-xxx --model gpt-4.1
+npx codetalk-cli config set --api-url https://api.openai.com/v1 --api-key sk-xxx --model gpt-4.1
 
 # 用并行 LLM 审查器扫描代码库
-npx codetalk scan --write
+npx codetalk-cli scan --write
 
 # 向代码库提问
-npx codetalk ask "认证怎么工作的？" --stream
+npx codetalk-cli ask "认证怎么工作的？" --stream
 
 # 生成修改计划
-npx codetalk plan "给 API 加上限流" --stream
+npx codetalk-cli plan "给 API 加上限流" --stream
 
 # 执行计划（并行应用文件修改）
-npx codetalk exec --parallel 4
+npx codetalk-cli exec --parallel 4
 
 # 修改后刷新语义图
-npx codetalk sync
+npx codetalk-cli sync
 ```
 
 配置存储于 `~/.codetalker/config.json`，也支持环境变量：
