@@ -71,11 +71,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "sync") {
-    await syncMap(options);
-    return;
-  }
-
   if (command === "check") {
     checkMap(options);
     return;

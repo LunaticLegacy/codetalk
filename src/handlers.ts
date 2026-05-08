@@ -276,12 +276,12 @@ export async function execution(options: CliOptions): Promise<void> {
   const tasks = fileSpecs.map((spec, index) => async () => {
     const agentId = `editor ${index + 1}`;
     const fileNum = `${index + 1}/${totalFiles}`;
-    panel.update(agentId, `Reading file ${fileNum}: ${spec.filePath}...`);
+    panel.update(agentId, `Reading file ${fileNum}: ${spec.filePath} (change: ${spec.description})...`);
 
     const filePath = resolve(options.cwd, spec.filePath);
     const fileContent = existsSync(filePath) ? readFileSync(filePath, "utf8") : "(new file)";
 
-    panel.update(agentId, `Asking LLM for file ${fileNum}: ${spec.filePath}...`);
+    panel.update(agentId, `Generating code for file ${fileNum}: ${spec.filePath} (change: ${spec.description})...`);
     const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan, currentMap);
     const editDetail = `File ${fileNum}: ${spec.filePath}`;
     const { content: rawContent, tokenStr: editorTokens } = await callChatCompletion(options, editorPrompt, panel, agentId, editDetail);
@@ -310,6 +310,19 @@ export async function execution(options: CliOptions): Promise<void> {
     panel.update("apply", `\u2713 ${result.filePath}`);
   }
   panel.done("apply", `Applied changes to ${changedCount} file${changedCount === 1 ? "" : "s"}`);
+
+  // Auto-sync semantic map after file changes
+  panel.add("sync", "Syncing semantic map with code changes...");
+  const changedPaths = getChangedFiles(options.cwd);
+  if (changedPaths.length > 0) {
+    const mapPathResolved = resolve(options.cwd, options.mapPath);
+    const currentMap = existsSync(mapPathResolved) ? readFileSync(mapPathResolved, "utf8") : "(no map)";
+    const updated = await runSemanticSync(options, currentMap, changedPaths);
+    writeFileSync(mapPathResolved, updated, "utf8");
+    panel.done("sync", "Semantic map synced");
+  } else {
+    panel.done("sync", "No changes detected, map unchanged");
+  }
   panel.finish();
 
   // Report to stdout

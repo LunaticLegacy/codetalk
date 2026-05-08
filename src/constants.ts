@@ -17,8 +17,7 @@ export const COMMANDS = [
   { command: "codetalk map", purpose: "Generate a baseline semantic map from repository structure." },
   { command: "codetalk ask \"message\" [--stream]", purpose: "Answer codebase questions from map and scan context." },
   { command: "codetalk plan \"request\" [--stream] [--out CODEPLAN.md]", purpose: "Generate a safe implementation plan and write it to disk." },
-  { command: "codetalk exec [--plan CODEPLAN.md] [--parallel 4] [--stream]", purpose: "Execute a CODEPLAN.md: apply all file changes in parallel via LLM." },
-  { command: "codetalk sync [--stream]", purpose: "Refresh the semantic map change-sync section with LLM semantic updates." },
+  { command: "codetalk exec [--plan CODEPLAN.md] [--parallel 4] [--stream]", purpose: "Execute a CODEPLAN.md: apply all file changes in parallel via LLM (auto-syncs map)." },
   { command: "codetalk check", purpose: "Fail when the semantic map is missing or stale." }
 ];
 
@@ -143,20 +142,9 @@ Flags:
   --cwd PATH      Working directory
   --api-url URL   LLM API endpoint
   --api-key KEY   LLM API key
-  --model MODEL   LLM model name`,
+  --model MODEL   LLM model name
 
-    sync: `codetalk sync - Sync observed code changes into the semantic map via LLM
-
-Usage:
-  codetalk sync [--map CODEMAP.md] [--stream]
-
-Flags:
-  --map PATH      Path to the semantic map (default: CODEMAP.md)
-  --stream        Stream LLM response in real time
-  --cwd PATH      Working directory
-  --api-url URL   LLM API endpoint
-  --api-key KEY   LLM API key
-  --model MODEL   LLM model name`,
+Note: exec automatically syncs the semantic map after applying changes.`,
 
     check: `codetalk check - Fail if the semantic map is missing or older than source files
 
@@ -193,7 +181,6 @@ Usage:
   codetalk ask "How does auth work?" [--stream]
   codetalk plan "Add magic-link login" [--stream] [--out CODEPLAN.md]
   codetalk exec [--plan CODEPLAN.md] [--parallel 4] [--stream]
-  codetalk sync [--map CODEMAP.md] [--stream]
   codetalk check [--map CODEMAP.md]
   codetalk version
 
@@ -206,8 +193,7 @@ Commands:
   map     Generate a baseline semantic map from the current repo shape
   ask     Ask a codebase question using LLM
   plan    Generate an implementation plan using LLM and write it to disk
-  exec    Execute a CODEPLAN.md: apply all file changes in parallel via LLM
-  sync    Sync observed code changes back into the semantic map via LLM
+  exec    Execute a CODEPLAN.md: apply all file changes in parallel via LLM (auto-syncs map)
   check   Fail if the semantic map is missing or older than source files
   version Print version and exit
 
@@ -223,7 +209,6 @@ User guide:
   Need streaming plans        codetalk plan "request" --stream
   Need to execute a plan     codetalk exec
   Need parallel execution    codetalk exec --parallel 8
-  Need to sync after edits    codetalk sync
   Need CI freshness checks    codetalk check
   Need version info           codetalk version
 

@@ -43,8 +43,6 @@ try {
   await testStreamingPrompt("plan", "change this safely", "plan --stream");
   await testPlanWrite();
   await testLlmMapWrite();
-  await testLlmSyncStream();
-
   run("check");
   console.log("CLI smoke tests passed");
 } finally {
@@ -162,15 +160,6 @@ async function testPlanWrite() {
     assertIncludes(output, "Wrote plan: plans/next.md", "plan confirms plan write");
     assertIncludes(read(join(fixture, "plans", "next.md")), "LLM Architecture", "plan lands returned plan content");
   }, { stream: false });
-}
-
-async function testLlmSyncStream() {
-  await withMockServer(async (apiUrl) => {
-    run("config", "set", "--api-url", apiUrl, "--api-key", "test-secret", "--model", "test-model");
-    const output = await runAsync("sync", "--stream");
-    assertIncludes(output, "[sync] Running LLM semantic sync over changed files.", "sync --stream prints LLM progress");
-    assertIncludes(read(join(fixture, "CODEMAP.md")), "LLM Architecture", "sync writes returned semantic map");
-  }, { stream: true });
 }
 
 async function withMockServer(callback, options) {
