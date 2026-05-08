@@ -18,7 +18,8 @@ export const COMMANDS = [
   { command: "codetalk ask \"message\" [--stream]", purpose: "Answer codebase questions from map and scan context." },
   { command: "codetalk plan \"request\" [--stream] [--out CODEPLAN.md]", purpose: "Generate a safe implementation plan and write it to disk." },
   { command: "codetalk exec [--plan CODEPLAN.md] [--parallel 4] [--stream]", purpose: "Execute a CODEPLAN.md: apply all file changes in parallel via LLM (auto-syncs map)." },
-  { command: "codetalk check", purpose: "Fail when the semantic map is missing or stale." }
+  { command: "codetalk check", purpose: "Fail when the semantic map is missing or stale." },
+  { command: "codetalk rollback [--list | <backup-id>]", purpose: "Restore files from a previous exec backup." }
 ];
 
 export const SOURCE_EXTENSIONS = new Map<string, string>([
@@ -182,20 +183,22 @@ Usage:
   codetalk plan "Add magic-link login" [--stream] [--out CODEPLAN.md]
   codetalk exec [--plan CODEPLAN.md] [--parallel 4] [--stream]
   codetalk check [--map CODEMAP.md]
+  codetalk rollback [--list | <backup-id>]
   codetalk version
 
 Also available as: codetalk-cli (aliased)
 
 Commands:
-  init    Create a semantic map template if one does not exist
-  config  Manually enter and store API URL, API key, and model
-  scan    Run parallel LLM reviewers to produce architecture semantics
-  map     Generate a baseline semantic map from the current repo shape
-  ask     Ask a codebase question using LLM
-  plan    Generate an implementation plan using LLM and write it to disk
-  exec    Execute a CODEPLAN.md: apply all file changes in parallel via LLM (auto-syncs map)
-  check   Fail if the semantic map is missing or older than source files
-  version Print version and exit
+  init     Create a semantic map template if one does not exist
+  config   Manually enter and store API URL, API key, and model
+  scan     Run parallel LLM reviewers to produce architecture semantics
+  map      Generate a baseline semantic map from the current repo shape
+  ask      Ask a codebase question using LLM
+  plan     Generate an implementation plan using LLM and write it to disk
+  exec     Execute a CODEPLAN.md: apply all file changes in parallel via LLM (auto-syncs map)
+  rollback Restore files from a previous exec backup
+  check    Fail if the semantic map is missing or older than source files
+  version  Print version and exit
 
 User guide:
   Need to start a repo        codetalk init

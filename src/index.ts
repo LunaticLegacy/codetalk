@@ -6,10 +6,11 @@ import {
   initMap,
   scanRepo,
   writeMap,
-  syncMap,
   askCodebase,
   planChange,
   execution,
+  rollbackTo,
+  listBackups,
   checkMap
 } from "./handlers.js";
 import { parseOptions } from "./utils.js";
@@ -18,7 +19,6 @@ async function main(): Promise<void> {
   const rawArgs = process.argv.slice(2);
   const [command = "help", ...rest] = rawArgs;
 
-  // --help / -h on a recognized subcommand shows subcommand-specific help
   if (command === "help" || command === "--help" || command === "-h") {
     printHelp();
     return;
@@ -68,6 +68,27 @@ async function main(): Promise<void> {
 
   if (command === "exec") {
     await execution(options);
+    return;
+  }
+
+  if (command === "rollback") {
+    const backupId = options.message || "";
+    if (backupId === "--list" || !backupId) {
+      const list = listBackups(options.cwd);
+      if (list.length === 0) {
+        console.log("No backups found.");
+      } else {
+        console.log("Available backups:");
+        for (const b of list) {
+          console.log(`  ${b.created}`);
+        }
+      }
+      if (!backupId) {
+        console.log('Usage: codetalk rollback <backup-id>  or  codetalk rollback --list');
+      }
+    } else {
+      rollbackTo(options.cwd, backupId);
+    }
     return;
   }
 

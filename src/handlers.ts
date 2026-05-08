@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -297,21 +298,60 @@ export async function execution(options: CliOptions): Promise<void> {
 
   const results = await runLimited(tasks, options.parallel);
 
-  // Phase 3: Apply all changes — show each file as it's written
-  const totalApply = results.length;
-  panel.add("apply", "Writing changes to disk...");
-  let changedCount = 0;
-  for (const result of results) {
-    panel.update("apply", `Writing file ${changedCount + 1}/${totalApply}: ${result.filePath}...`);
-    const target = resolve(options.cwd, result.filePath);
-    ensureParentDirectory(target);
-    writeFileSync(target, result.newContent, "utf8");
-    changedCount++;
-    panel.update("apply", `\u2713 ${result.filePath}`);
-  }
-  panel.done("apply", `Applied changes to ${changedCount} file${changedCount === 1 ? "" : "s"}`);
+  // Phase 3: Apply all changes — backup, validate, write
+  const backupDir = createBackupDir(options.cwd);
+  const projectRoot = resolve(options.cwd);
+  const manifest = [];
 
-  // Auto-sync semantic map after file changes
+  panel.add("apply", "Backing up originals...");
+
+  const validated = [];
+  for (const r of results) {
+    const target = resolve(options.cwd, r.filePath);
+
+    if (!target.startsWith(projectRoot)) {
+      panel.update("apply", "Skipped " + r.filePath + ": outside project root");
+      manifest.push({ filePath: r.filePath, backedUp: false, action: "skipped" });
+      continue;
+    }
+
+    let backedUp = false;
+    if (existsSync(target)) {
+      const bakRel = normalizePath(relative(options.cwd, target));
+      const bakDest = join(backupDir, bakRel.replace(/[^a-zA-Z0-9._\/-]/g, "_"));
+      ensureParentDirectory(bakDest);
+      copyFileSync(target, bakDest);
+      backedUp = true;
+    }
+
+    if (r.filePath.endsWith(".py")) {
+      panel.update("apply", "Syntax check: " + r.filePath + "...");
+      try {
+        execFileSync("python", ["-c", "import ast; ast.parse(" + JSON.stringify(r.newContent) + ")"], {
+          cwd: options.cwd, stdio: "pipe", encoding: "utf8"
+        });
+        panel.update("apply", "Syntax OK: " + r.filePath);
+      } catch {
+        panel.update("apply", "FAIL: syntax error in " + r.filePath + ", skipping");
+        manifest.push({ filePath: r.filePath, backedUp, action: "skipped (syntax error)" });
+        continue;
+      }
+    }
+
+    validated.push(r);
+    manifest.push({ filePath: r.filePath, backedUp, action: r.action });
+  }
+
+  let changedCount = 0;
+  for (const r of validated) {
+    const fileNum = (changedCount + 1) + "/" + results.length;
+    panel.update("apply", "Writing file " + fileNum + ": " + r.filePath + "...");
+    const target = resolve(options.cwd, r.filePath);
+    ensureParentDirectory(target);
+    writeFileSync(target, r.newContent, "utf8");
+    changedCount++;
+    panel.update("apply", "✓ " + r.filePath);
+  }// Auto-sync semantic map after file changes
   panel.add("sync", "Syncing semantic map with code changes...");
   const changedPaths = getChangedFiles(options.cwd);
   if (changedPaths.length > 0) {
@@ -331,6 +371,53 @@ export async function execution(options: CliOptions): Promise<void> {
   for (const result of results) {
     const label = result.action === "modified" ? "M" : "A";
     console.log(`  ${label} ${result.filePath}`);
+  }
+}
+
+// ── Backup & rollback ─────────────────────────────────────────────────────────
+
+const BACKUP_ROOT = ".codetalk/backups";
+
+function createBackupDir(cwd: string): string {
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const dir = join(cwd, BACKUP_ROOT, ts);
+  mkdirSync(dir, { recursive: true });
+  // Write a manifest placeholder
+  writeFileSync(join(dir, ".backup-manifest"), `Backup created at ${new Date().toISOString()}\n`, "utf8");
+  return dir;
+}
+
+export function listBackups(cwd: string): Array<{ dir: string; created: string }> {
+  const root = join(cwd, BACKUP_ROOT);
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => ({
+      dir: join(root, d.name),
+      created: d.name
+    }))
+    .sort((a, b) => b.created.localeCompare(a.created));
+}
+
+export function rollbackTo(cwd: string, backupId: string): void {
+  const src = join(cwd, BACKUP_ROOT, backupId);
+  if (!existsSync(src)) {
+    fail(`Backup not found: ${backupId}. Run "codetalk rollback --list" to see available backups.`);
+  }
+
+  const restored: string[] = [];
+  for (const entry of readdirSync(src, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name !== ".backup-manifest") {
+      const originalPath = join(cwd, entry.name);
+      ensureParentDirectory(originalPath);
+      copyFileSync(join(src, entry.name), originalPath);
+      restored.push(entry.name);
+    }
+  }
+
+  console.log(`Restored ${restored.length} file${restored.length === 1 ? "" : "s"} from backup ${backupId}:`);
+  for (const f of restored) {
+    console.log(`  R ${f}`);
   }
 }
 
