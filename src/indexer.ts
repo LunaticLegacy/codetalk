@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 
 import { SOURCE_EXTENSIONS, IGNORED_DIRS } from "./constants.js";
 import { getExtension, normalizePath } from "./utils.js";
+import { extractSymbols } from "./ast/index.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -117,13 +117,6 @@ export function loadIndex(cwd: string): SymbolIndex | null {
 
 // ── Internal helpers ───────────────────────────────────────────────────────────
 
-interface SymbolExtract {
-  exports: string[];
-  imports: string[];
-  functions: string[];
-  types: string[];
-}
-
 function walkSourceFiles(cwd: string, cb: (relPath: string, absPath: string, ext: string) => void): void {
   function visit(dir: string): void {
     let entries: string[];
@@ -162,108 +155,4 @@ function walkSourceFiles(cwd: string, cb: (relPath: string, absPath: string, ext
   }
 
   visit(cwd);
-}
-
-function extractSymbols(filePath: string, ext: string): SymbolExtract {
-  const exports: string[] = [];
-  const imports: string[] = [];
-
-  switch (ext) {
-    case ".py":
-      return extractPythonSymbols(filePath);
-    case ".js":
-    case ".jsx":
-    case ".ts":
-    case ".tsx":
-    case ".mjs":
-    case ".cjs":
-      return extractJsTsSymbols(filePath);
-    default:
-      return { exports, imports, functions: [], types: [] };
-  }
-}
-
-/**
- * Extract exports and imports from a Python file using `ast` module via subprocess.
- */
-function extractPythonSymbols(filePath: string): SymbolExtract {
-  try {
-    const script = [
-      "import ast, sys, json",
-      `with open(sys.argv[1]) as f:`,
-      `    tree = ast.parse(f.read())`,
-      `    funcs = [n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]`,
-      `    types = [n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]`,
-      `    imports = []`,
-      `    for n in ast.walk(tree):`,
-      `        if isinstance(n, ast.Import):`,
-      `            imports.extend(a.name for a in n.names)`,
-      `        elif isinstance(n, ast.ImportFrom):`,
-      `            if n.module: imports.append(n.module)`,
-      `    print(json.dumps({"exports": funcs + types, "imports": imports, "functions": funcs, "types": types}))`
-    ].join("\n");
-
-    const output = execFileSync("python", ["-c", script, filePath], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 10_000
-    });
-
-    return JSON.parse(output.trim()) as SymbolExtract;
-  } catch {
-    return { exports: [], imports: [], functions: [], types: [] };
-  }
-}
-
-/**
- * Extract exports and imports from JS/TS files using regex.
- */
-function extractJsTsSymbols(filePath: string): SymbolExtract {
-  const exports: string[] = [];
-  const imports: string[] = [];
-  const functions: string[] = [];
-  const types: string[] = [];
-
-  let content: string;
-  try {
-    content = readFileSync(filePath, "utf8");
-  } catch {
-    return { exports, imports, functions, types };
-  }
-
-  // Extract function exports
-  const funcRegex = /export\s+(?:default\s+)?(?:async\s+)?function\s+(\w+)/g;
-  let m;
-  while ((m = funcRegex.exec(content)) !== null) {
-    functions.push(m[1]);
-    exports.push(m[1]);
-  }
-
-  // Extract class/type/interface exports
-  const typeRegex = /export\s+(?:default\s+)?(?:class|type|interface|enum|abstract\s+class)\s+(\w+)/g;
-  while ((m = typeRegex.exec(content)) !== null) {
-    types.push(m[1]);
-    exports.push(m[1]);
-  }
-
-  // Extract const/let/var exports
-  const varRegex = /export\s+(?:default\s+)?(?:const|let|var)\s+(\w+)/g;
-  while ((m = varRegex.exec(content)) !== null) {
-    exports.push(m[1]);
-  }
-
-  // Extract imports
-  const importRegex = /import\s+(?:\{[^}]*\}|[\w*]+)\s*from\s+['"]([^'"]+)['"]/g;
-  while ((m = importRegex.exec(content)) !== null) {
-    imports.push(m[1]);
-  }
-
-  const sideEffectRegex = /import\s+['"]([^'"]+)['"]/g;
-  while ((m = sideEffectRegex.exec(content)) !== null) {
-    if (!imports.includes(m[1])) {
-      imports.push(m[1]);
-    }
-  }
-
-  return { exports, imports, functions, types };
 }
