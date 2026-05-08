@@ -281,7 +281,8 @@ export async function execution(options: CliOptions): Promise<void> {
 
     panel.update(agentId, `Asking LLM to generate new code for ${spec.filePath}...`);
     const editorPrompt = createExecEditorPrompt(spec.filePath, spec.description, fileContent, plan);
-    const newContent = await callChatCompletion(options, editorPrompt, panel, agentId);
+    let newContent = await callChatCompletion(options, editorPrompt, panel, agentId);
+    newContent = stripCodeFence(newContent);
 
     return {
       filePath: spec.filePath,
@@ -473,6 +474,11 @@ File: ${file.path} (${file.language}, ${file.bytes} bytes)
 
 function sanitizePath(p: string): string {
   return p.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+/** Strip markdown code fences from LLM output that should be raw file content. */
+function stripCodeFence(content: string): string {
+  return content.replace(/^```[a-zA-Z]*\n?|[\r\n]```\s*$/g, "").trim();
 }
 
 export async function runSemanticSync(options: CliOptions, currentMap: string, changedFiles: string[]): Promise<string> {
