@@ -9,6 +9,41 @@ export const DEFAULT_PLAN_PATH = "CODEPLAN.md";
 export const DEFAULT_MODEL = "gpt-4.1";
 export const DEFAULT_API_URL = "https://api.openai.com/v1";
 
+export const PROVIDERS = [
+  {
+    id: "openai",
+    label: "OpenAI",
+    apiUrl: "https://api.openai.com/v1",
+    protocol: "openai"
+  },
+  {
+    id: "anthropic",
+    label: "Anthropic",
+    apiUrl: "https://api.anthropic.com/v1",
+    protocol: "openai-compatible"
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    apiUrl: "https://api.deepseek.com",
+    protocol: "openai-compatible"
+  },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    apiUrl: "https://openrouter.ai/api/v1",
+    protocol: "openai-compatible"
+  },
+  {
+    id: "manual",
+    label: "Manual",
+    apiUrl: "",
+    protocol: "openai-compatible"
+  }
+] as const;
+
+export type ProviderId = typeof PROVIDERS[number]["id"];
+
 export const COMMANDS = [
   { command: "codetalk help", purpose: "Show commands and user workflow." },
   { command: "codetalk init", purpose: "Create a semantic map template." },
@@ -82,6 +117,8 @@ Usage:
 Interactive mode:
   Run without arguments in a terminal to edit config with a keyboard menu.
   In non-TTY shells, codetalk falls back to plain prompts.
+  Built-in providers: OpenAI, Anthropic, DeepSeek, OpenRouter, Manual.
+  Selecting a provider prompts for credentials and fetches available models when supported.
 
 Flags:
   --api-url URL   LLM API endpoint

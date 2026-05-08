@@ -52,6 +52,7 @@ export type ScanReport = {
 };
 
 export type CodetalkerConfig = {
+  provider?: string;
   apiUrl: string;
   apiKey: string;
   model: string;

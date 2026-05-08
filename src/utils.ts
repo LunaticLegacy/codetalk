@@ -206,6 +206,7 @@ export function tryReadConfig(): CodetalkerConfig | undefined {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<CodetalkerConfig>;
     if (parsed.apiUrl && parsed.apiKey && parsed.model) {
       return {
+        provider: parsed.provider,
         apiUrl: parsed.apiUrl,
         apiKey: parsed.apiKey,
         model: parsed.model
@@ -229,6 +230,7 @@ export function readConfig(options: CliOptions): CodetalkerConfig {
   }
 
   return {
+    provider: fileConfig?.provider,
     apiUrl: trimTrailingSlash(apiUrl),
     apiKey,
     model

@@ -26,6 +26,7 @@ try {
   const shown = run("config", "show");
   assertIncludes(shown, "API URL: https://api.example.com/v1", "config show prints API URL");
   assertIncludes(shown, "API key: test...cret", "config show masks API key");
+  assertIncludes(shown, "Provider: Manual", "config show prints provider");
 
   const version = run("version");
   assertIncludes(version, "codetalk v", "version prints version string");

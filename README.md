@@ -137,7 +137,7 @@ plan ──> CODEPLAN.md ──> exec ──> file changes ──> sync ──> 
 | Command | Description |
 |---------|-------------|
 | `init` | Create a `CODEMAP.md` template |
-| `config` | Interactive API configuration menu |
+| `config` | Interactive provider/API configuration menu |
 | `config set --api-url URL --api-key KEY [--model MODEL]` | Non-interactive config |
 | `config show` | Display masked config |
 | `scan [--write] [--json] [--stream] [--parallel N]` | Run parallel LLM reviewers to produce architecture semantics |

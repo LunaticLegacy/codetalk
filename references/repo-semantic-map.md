@@ -27,7 +27,7 @@ map is a working contract for agentic code modification.
 ## Types
 
 - `CliOptions`: parsed command options with `cwd`, `mapPath`, `outPath`, `json`, `stream`, `llm`, `write`, `parallel`, API override fields, and message text.
-- `CodetalkerConfig`: API URL, API key, and model settings used by `ask` and `plan`.
+- `CodetalkerConfig`: optional provider id plus API URL, API key, and model settings used by `ask` and `plan`.
 - `SourceFile`: source inventory record with normalized path, language, and byte size.
 - `SourceSummary`: aggregate source count, language counts, and entry candidates.
 - `ScanReport`: structured repository scan covering source files, command surface, config state, semantic maps, package metadata, CI, module roles, and git state.
@@ -40,10 +40,16 @@ map is a working contract for agentic code modification.
 - `parseOptions(args)`: parses `--cwd`, `--map`, `--out`, `--json`, `--stream`, `--llm`, `--write`, `--parallel`, API override flags, and command operands; returns normalized CLI options.
 - `printHelp()`: writes CLI usage and product positioning to stdout.
 - `initMap(options)`: creates a semantic map template when the target map file does not already exist.
-- `configure(options)`: writes API URL, API key, and model config; `show` prints a masked summary, `set` writes non-interactively, TTY mode opens a keyboard menu, and non-TTY mode falls back to plain prompts.
-- `configureTui()`: loads existing config, maintains an editable draft, and loops through a keyboard-driven menu until the user saves or quits.
-- `selectConfigAction(draft)`: renders the config menu, listens for Up/Down/Enter/Ctrl+C keypresses in raw TTY mode, and returns the selected config action.
+- `configure(options)`: writes provider, API URL, API key, and model config; `show` prints a masked summary, `set` writes non-interactively and infers provider from API URL, TTY mode opens a keyboard menu, and non-TTY mode falls back to plain prompts.
+- `configureTui()`: loads existing config, maintains an editable draft, and loops through a keyboard-driven menu until the user saves or quits; provider selection owns API URL, API key, and model selection.
+- `selectConfigAction(draft)`: renders the config menu, listens for Up/Down/Enter/Ctrl+C keypresses in raw TTY mode, and returns provider/save/quit actions.
 - `renderConfigMenu(draft, actions, selected)`: clears and redraws the terminal menu with masked API key display and current selected row.
+- `selectProvider(currentProvider)`: opens a provider selector with built-in OpenAI, Anthropic, DeepSeek, OpenRouter, and Manual options, keeping Manual last; built-in providers set their API URL and Manual asks for a custom API URL.
+- `chooseModelForProvider(draft)`: after provider/API key entry, tries to fetch OpenAI-compatible model IDs from `${apiUrl}/models`; on success opens a model selector, and on failure falls back to manual model input.
+- `fetchProviderModels(apiUrl, apiKey)`: sends `GET /models` with Bearer authorization and a 15s timeout, returning sorted model IDs or an error string.
+- `selectModel(models, currentModel)`: opens a keyboard-driven model picker with a final manual-input option.
+- `renderProviderMenu(providers, selected)`: clears and redraws the provider selector with each provider's default API URL or custom marker.
+- `inferProviderId(apiUrl)`: maps known provider API URLs to provider ids, otherwise returns `manual`.
 - `promptConfigValue(label, current)`: temporarily uses readline prompts to edit one selected config field.
 - `scanRepo(options)`: builds a product-level repository scan and prints text or JSON; with `--llm`, coordinates parallel reviewer model calls to produce a complete semantic map, and with `--write`, writes it to disk.
 - `writeMap(options)`: writes a baseline semantic map generated from current repository structure.
@@ -110,7 +116,7 @@ map is a working contract for agentic code modification.
 3. The agent inspects relevant source files in parallel.
 4. Code changes are planned against the map as the current semantic contract.
 5. After edits, the agent rereads touched files and syncs the semantic map.
-6. Users configure API URL, API key, and model with `codetalker config` in an interactive TTY menu, `codetalker config set` in scripts, or environment variables.
+6. Users configure provider, API URL, API key, and model with `codetalker config` in an interactive TTY menu, `codetalker config set` in scripts, or environment variables.
 7. `codetalker ask` and `codetalker plan` read the semantic map and repo scan, then call the configured API.
 8. `codetalker scan --llm --write` lists all source files, asks a coordinator agent for an inspection plan, runs up to `--parallel` reviewer agents over file shards, asks a merger agent to produce the final semantic map, emits non-streaming progress to stderr while waiting, and writes the returned complete semantic map to `CODEMAP.md`.
 9. `codetalker plan "message" --write --out path.md` writes a reviewable implementation plan to disk without modifying source files.
@@ -127,7 +133,7 @@ map is a working contract for agentic code modification.
 - Maintains `agents/openai.yaml` as the UI-facing metadata for this skill package.
 - `codetalker map`, `init`, and `sync` write markdown files.
 - `codetalker config` writes API configuration to `~/.codetalker/config.json` by default or `CODETALKER_CONFIG` when set.
-- `codetalker config` in a TTY clears and redraws a local menu on stdout/stderr-compatible terminal streams, masks existing API keys in the menu, and writes config only after the user selects save.
+- `codetalker config` in a TTY clears and redraws a local menu on stdout/stderr-compatible terminal streams, masks existing API keys in the menu, lets users choose a built-in provider or Manual, updates known providers' API URLs automatically, fetches available models via `/models` when supported, and writes config only after the user selects save.
 - `codetalker ask` and `codetalker plan` send the semantic map, repository scan, and user request to the configured API URL.
 - `codetalker plan --write` writes the model-returned plan to `CODEPLAN.md` by default or the `--out` path.
 - `codetalker scan --llm` sends repository file lists, reviewer shard evidence, reviewer outputs, and the existing map to the configured API URL across coordinator, reviewer, and merger requests.
