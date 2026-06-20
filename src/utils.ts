@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 
-import type { CliOptions, CodetalkerConfig, ScanDepth, ScanReport, SourceFile, SourceSummary } from "./types.js";
-import { DEFAULT_API_URL, DEFAULT_DEPTH, DEFAULT_MAP_PATH, DEFAULT_MODEL, DEFAULT_PLAN_PATH, DEFAULT_TIMEOUT_MS, SOURCE_EXTENSIONS, IGNORED_DIRS, COMMANDS } from "./constants.js";
+import type { CliOptions, CodetalkerConfig, ScanReport, SourceFile, SourceSummary } from "./types.js";
+import { DEFAULT_API_URL, DEFAULT_MAP_PATH, DEFAULT_MODEL, DEFAULT_PLAN_PATH, DEFAULT_TIMEOUT_MS, SOURCE_EXTENSIONS, IGNORED_DIRS, COMMANDS } from "./constants.js";
 import { loadIndex } from "./indexer.js";
 
 // ── File collection ───────────────────────────────────────────────────────────
@@ -657,7 +657,7 @@ export function parseOptions(args: string[]): CliOptions {
   let stream = false;
   let write = false;
   let parallel = 4;
-  let depth: ScanDepth = DEFAULT_DEPTH;
+  let parallelMode: "fixed" | "max" = "fixed";
   let timeout: number | undefined;
   let apiUrl: string | undefined;
   let apiKey: string | undefined;
@@ -703,16 +703,18 @@ export function parseOptions(args: string[]): CliOptions {
     }
 
     if (arg === "--parallel") {
-      parallel = Number.parseInt(args[++index] ?? "4", 10);
-      continue;
-    }
-
-    if (arg === "--depth") {
-      const raw = (args[++index] ?? "medium").toLowerCase();
-      if (!["low", "medium", "high", "full"].includes(raw)) {
-        fail(`Invalid depth: "${raw}". Use low, medium, high, or full.`);
+      const raw = args[++index] ?? "4";
+      if (raw.toUpperCase() === "MAX") {
+        parallelMode = "max";
+        parallel = 4;
+        continue;
       }
-      depth = raw as ScanDepth;
+
+      const parsed = Number.parseInt(raw, 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        fail(`Invalid parallel value: "${raw}". Use a positive number or MAX.`);
+      }
+      parallel = parsed;
       continue;
     }
 
@@ -743,7 +745,22 @@ export function parseOptions(args: string[]): CliOptions {
     operands.push(arg);
   }
 
-  return { cwd, mapPath, outPath, planPath, json, stream, write, parallel: normalizeParallel(parallel), depth, timeout, apiUrl, apiKey, model, message: operands.join(" ").trim() };
+  return {
+    cwd,
+    mapPath,
+    outPath,
+    planPath,
+    json,
+    stream,
+    write,
+    parallel: normalizeParallel(parallel),
+    parallelMode,
+    timeout,
+    apiUrl,
+    apiKey,
+    model,
+    message: operands.join(" ").trim()
+  };
 }
 
 // ── Concurrency ───────────────────────────────────────────────────────────────

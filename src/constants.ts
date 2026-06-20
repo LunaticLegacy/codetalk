@@ -1,13 +1,16 @@
 import { readFileSync } from "node:fs";
-import type { ScanDepth } from "./types.js";
 
 // ── ANSI styling (zero-dependency) ──────────────────────────────────────────
 
-const isTTY = process.stdout.isTTY === true;
+const isTTY = process.stdout.isTTY === true || process.stderr.isTTY === true;
 export const BOLD = isTTY ? "\x1b[1m" : "";
 export const DIM = isTTY ? "\x1b[2m" : "";
 export const UNDERLINE = isTTY ? "\x1b[4m" : "";
 export const RESET = isTTY ? "\x1b[0m" : "";
+export const CYAN = isTTY ? "\x1b[36m" : "";
+export const GREEN = isTTY ? "\x1b[32m" : "";
+export const MAGENTA = isTTY ? "\x1b[35m" : "";
+export const YELLOW = isTTY ? "\x1b[33m" : "";
 const SEP = "─".repeat(48);
 
 const { version: VERSION } = JSON.parse(
@@ -18,15 +21,7 @@ export const DEFAULT_MAP_PATH = "CODEMAP.md";
 export const DEFAULT_PLAN_PATH = "CODEPLAN.md";
 export const DEFAULT_MODEL = "gpt-4.1";
 export const DEFAULT_API_URL = "https://api.openai.com/v1";
-export const DEFAULT_DEPTH: ScanDepth = "medium";
 export const DEFAULT_TIMEOUT_MS = 180_000;
-
-export const DEPTH_LABELS: Record<ScanDepth, string> = {
-  low: "Basic role identification only",
-  medium: "Exports, imports, function names, and type names",
-  high: "Full semantic: function signatures, class members, interfaces, decorators",
-  full: "Everything in HIGH plus control flow, API interfaces, error handling, async patterns"
-};
 
 export const PROVIDERS = [
   {
@@ -67,7 +62,8 @@ export const COMMANDS = [
   { command: "codetalk help", purpose: "Show commands and user workflow." },
   { command: "codetalk init", purpose: "Create a semantic map template." },
   { command: "codetalk config", purpose: "Configure API URL, API key, and model with an interactive menu." },
-  { command: "codetalk scan [--depth low|medium|high|full] [--timeout MS]", purpose: "Analyze repository and produce a living semantic map." },
+  { command: "codetalk scan [--json] [--stream] [--timeout MS]", purpose: "Analyze repository and produce a living semantic map." },
+  { command: "codetalk semantic [--parallel N|MAX] [--timeout MS]", purpose: "Extract detailed function and method semantics into CODEMAP.md." },
   { command: "codetalk map", purpose: "Generate a baseline semantic map from repository structure." },
   { command: "codetalk ask \"message\" [--stream]", purpose: "Answer codebase questions from map and scan context." },
   { command: "codetalk plan \"request\" [--stream] [--out CODEPLAN.md]", purpose: "Generate a safe implementation plan and write it to disk." },
@@ -189,16 +185,31 @@ const COMMAND_HELPS: Record<string, HelpEntry> = {
   },
   scan: {
     title: "codetalk scan — Run parallel LLM reviewers to produce architecture semantics",
-    usage: "codetalk scan [--json] [--depth low|medium|high|full] [--timeout MS]",
+    usage: "codetalk scan [--json] [--stream] [--timeout MS]",
     flags: [
       { flag: "--json", desc: "Output scan report as JSON" },
-      { flag: "--depth LVL", desc: "Scan depth: low, medium, high, or full (default: medium)" },
+      { flag: "--stream", desc: "Stream the merger response in real time" },
+      { flag: "--depth LVL", desc: "(removed) LSP provides full symbol data; tiered scan depth is no longer supported" },
       { flag: "--timeout MS", desc: "API request timeout in milliseconds (default: 180000)" },
       { flag: "--cwd PATH", desc: "Working directory" },
       { flag: "--api-url URL", desc: "LLM API endpoint" },
       { flag: "--api-key KEY", desc: "LLM API key" },
       { flag: "--model MODEL", desc: "LLM model name" }
     ]
+  },
+  semantic: {
+    title: "codetalk semantic — Build a detailed function-level semantic map",
+    usage: "codetalk semantic [--parallel N|MAX] [--timeout MS]",
+    flags: [
+      { flag: "--parallel N", desc: "Number of semantic workers to run (default: 4)" },
+      { flag: "--parallel MAX", desc: "Run one worker per function or method, capped at 40 workers" },
+      { flag: "--timeout MS", desc: "API request timeout in milliseconds (default: 180000)" },
+      { flag: "--cwd PATH", desc: "Working directory" },
+      { flag: "--api-url URL", desc: "LLM API endpoint" },
+      { flag: "--api-key KEY", desc: "LLM API key" },
+      { flag: "--model MODEL", desc: "LLM model name" }
+    ],
+    note: "semantic reads source code directly, skips unchanged functions using the local cache, and rewrites CODEMAP.md's Functions section."
   },
   map: {
     title: "codetalk map — Generate a baseline semantic map from repo structure",
@@ -268,7 +279,8 @@ export function printHelp(): void {
   lines.push(`  ${BOLD}codetalk${RESET} config`);
   lines.push(`  ${BOLD}codetalk${RESET} config set --api-url URL --api-key KEY [--model MODEL]`);
   lines.push(`  ${BOLD}codetalk${RESET} config show`);
-  lines.push(`  ${BOLD}codetalk${RESET} scan [--json] [--depth low|medium|high|full] [--timeout MS]`);
+  lines.push(`  ${BOLD}codetalk${RESET} scan [--json] [--stream] [--timeout MS]`);
+  lines.push(`  ${BOLD}codetalk${RESET} semantic [--parallel N|MAX] [--timeout MS]`);
   lines.push(`  ${BOLD}codetalk${RESET} map [--map CODEMAP.md]`);
   lines.push(`  ${BOLD}codetalk${RESET} ask "How does auth work?" [--stream]`);
   lines.push(`  ${BOLD}codetalk${RESET} plan "Add magic-link login" [--stream] [--out CODEPLAN.md]`);
@@ -288,6 +300,7 @@ export function printHelp(): void {
     { name: "init", desc: "Create a semantic map template if one does not exist" },
     { name: "config", desc: "Configure API URL, API key, and model" },
     { name: "scan", desc: "Run parallel LLM reviewers to produce architecture semantics" },
+    { name: "semantic", desc: "Extract detailed function-level semantics into CODEMAP.md" },
     { name: "map", desc: "Generate a baseline semantic map from the current repo shape" },
     { name: "ask", desc: "Ask a codebase question using LLM" },
     { name: "plan", desc: "Generate an implementation plan using LLM and write it to disk" },
@@ -311,7 +324,8 @@ export function printHelp(): void {
     { need: "Need to start a repo", action: "codetalk init" },
     { need: "Need to configure API", action: "codetalk config" },
     { need: "Need repo understanding", action: "codetalk scan" },
-    { need: "Need deeper repo scan", action: "codetalk scan --depth high" },
+    { need: "Need deeper repo scan", action: "codetalk scan" },
+    { need: "Need function semantics", action: "codetalk semantic" },
     { need: "Need a semantic map", action: "codetalk map" },
     { need: "Need to ask about code", action: 'codetalk ask "question"' },
     { need: "Need a change plan", action: 'codetalk plan "request"' },

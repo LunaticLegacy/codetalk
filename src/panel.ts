@@ -6,10 +6,14 @@ function formatElapsed(ms: number): string {
   return `${m}m${s}s`;
 }
 
+const RENDER_DEBOUNCE_MS = 80;
+
 export class MissionPanel {
   #agents: Array<{ id: string; status: string; done: boolean; printed: boolean; startedAt: number }> = [];
   #isTTY: boolean;
   #started: boolean = false;
+  #dirty: boolean = false;
+  #renderTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.#isTTY = process.stderr.isTTY === true;
@@ -17,14 +21,14 @@ export class MissionPanel {
 
   add(id: string, status: string = ""): void {
     this.#agents.push({ id, status, done: false, printed: false, startedAt: Date.now() });
-    this.#render();
+    this.#scheduleRender();
   }
 
   update(id: string, status: string): void {
     const agent = this.#agents.find((a) => a.id === id);
-    if (agent) {
+    if (agent && agent.status !== status) {
       agent.status = status;
-      this.#render();
+      this.#scheduleRender();
     }
   }
 
@@ -41,15 +45,40 @@ export class MissionPanel {
         agent.status = status + ` (${elapsedStr})`;
       }
       agent.done = true;
-      this.#render();
+      // Done renders are always important — flush any pending debounce
+      if (this.#renderTimer) {
+        clearTimeout(this.#renderTimer);
+        this.#renderTimer = null;
+      }
+      this.#dirty = true;
+      this.#flushRender();
     }
   }
 
   finish(): void {
-    // Cursor is already at the bottom of the panel after last render.
+    // Flush any pending render
+    if (this.#renderTimer) {
+      clearTimeout(this.#renderTimer);
+      this.#renderTimer = null;
+    }
+    if (this.#dirty) {
+      this.#flushRender();
+    }
   }
 
-  #render(): void {
+  #scheduleRender(): void {
+    this.#dirty = true;
+    if (this.#renderTimer) return; // already scheduled
+    this.#renderTimer = setTimeout(() => {
+      this.#renderTimer = null;
+      this.#flushRender();
+    }, RENDER_DEBOUNCE_MS);
+  }
+
+  #flushRender(): void {
+    if (!this.#dirty) return;
+    this.#dirty = false;
+
     if (this.#isTTY) {
       if (!this.#started) {
         // First render: save position, write all agent lines

@@ -1,5 +1,3 @@
-export type ScanDepth = "low" | "medium" | "high" | "full";
-
 export type CliOptions = {
   cwd: string;
   mapPath: string;
@@ -9,12 +7,74 @@ export type CliOptions = {
   stream: boolean;
   write: boolean;
   parallel: number;
-  depth: ScanDepth;
+  parallelMode: "fixed" | "max";
   timeout?: number;
   apiUrl?: string;
   apiKey?: string;
   model?: string;
   message: string;
+};
+
+export type SemanticFunctionKind = "function" | "method";
+
+export type SemanticFunctionRecord = {
+  purpose: string;
+  inputs: string[];
+  outputs: string[];
+  sideEffects: string[];
+  failureModes: string[];
+  calls: string[];
+  calledBy: string[];
+  ownershipContext: string;
+  inheritanceContext: string;
+  notes: string[];
+};
+
+export type SemanticFunctionCacheEntry = {
+  key: string;
+  fingerprint: string;
+  filePath: string;
+  language: string;
+  kind: SemanticFunctionKind;
+  name: string;
+  qualifiedName: string;
+  owner?: string;
+  sourceRange?: {
+    startLine: number;
+    endLine: number;
+  };
+  classContext?: string;
+  siblingMembers: string[];
+  semantic: SemanticFunctionRecord;
+  updatedAt: string;
+};
+
+export type SemanticCacheManifest = {
+  version: 1;
+  updatedAt: string;
+  items: Record<string, SemanticFunctionCacheEntry>;
+};
+
+export type SemanticInventoryItem = {
+  key: string;
+  fingerprint: string;
+  filePath: string;
+  language: string;
+  kind: SemanticFunctionKind;
+  name: string;
+  qualifiedName: string;
+  owner?: string;
+  sourceRange?: {
+    startLine: number;
+    endLine: number;
+  };
+  classContext?: string;
+  siblingMembers: string[];
+  fileImports: string[];
+  fileFunctions: string[];
+  fileTypes: string[];
+  sourceExcerpt: string;
+  contextExcerpt: string;
 };
 
 export type SourceFile = {

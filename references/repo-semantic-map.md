@@ -17,7 +17,7 @@ map is a working contract for agentic code modification.
 - `package.json`: npm package metadata, binary names, scripts, and TypeScript dev dependencies
 - `package-lock.json`: locked npm dependency graph for reproducible installs and CI
 - `tsconfig.json`: TypeScript compiler configuration for building `src` into `dist`
-- `src/index.ts`: TypeScript CLI source for `init`, `config`, `scan`, `map`, `ask`, `plan`, `sync`, and `check`, including LLM-backed architecture scan and semantic sync
+- `src/index.ts`: TypeScript CLI source for `init`, `config`, `scan`, `semantic`, `map`, `ask`, `plan`, `sync`, and `check`, including LLM-backed architecture scan, function-level semantic extraction, and semantic sync
 - `dist/index.js`: built executable CLI entrypoint used by package binaries
 - `scripts/test-cli.mjs`: dependency-free smoke tests for the built CLI against a temporary fixture repo
 - `.github/workflows/ci.yml`: GitHub Actions workflow for install, typecheck, build, tests, and package verification
@@ -26,18 +26,22 @@ map is a working contract for agentic code modification.
 
 ## Types
 
-- `CliOptions`: parsed command options with `cwd`, `mapPath`, `outPath`, `json`, `stream`, `llm`, `write`, `parallel`, API override fields, and message text.
+- `CliOptions`: parsed command options with `cwd`, `mapPath`, `outPath`, `json`, `stream`, `llm`, `write`, `parallel`, `parallelMode`, API override fields, and message text.
 - `CodetalkerConfig`: optional provider id plus API URL, API key, and model settings used by `ask` and `plan`.
 - `SourceFile`: source inventory record with normalized path, language, and byte size.
 - `SourceSummary`: aggregate source count, language counts, and entry candidates.
 - `ScanReport`: structured repository scan covering source files, command surface, config state, semantic maps, package metadata, CI, module roles, and git state.
+- `SemanticFunctionRecord`: structured per-function semantic output with purpose, inputs, outputs, side effects, failure modes, call relationships, ownership context, inheritance context, and notes.
+- `SemanticFunctionCacheEntry`: cached semantic analysis for one function or method, keyed by fingerprint.
+- `SemanticCacheManifest`: project-local cache manifest stored under `.codetalk/semantic/`.
+- `SemanticInventoryItem`: queued semantic work item built from AST/LSP symbols and source excerpts.
 - `SOURCE_EXTENSIONS`: extension-to-language registry used by repository scanning.
 - `IGNORED_DIRS`: directory names skipped during recursive source collection.
 
 ## Functions
 
 - `main()`: dispatches CLI commands from `process.argv`; exits with help, command behavior, or an unknown-command failure.
-- `parseOptions(args)`: parses `--cwd`, `--map`, `--out`, `--json`, `--stream`, `--llm`, `--write`, `--parallel`, API override flags, and command operands; returns normalized CLI options.
+- `parseOptions(args)`: parses `--cwd`, `--map`, `--out`, `--json`, `--stream`, `--llm`, `--write`, `--parallel`, API override flags, and command operands; supports `--parallel MAX` for semantic extraction and returns normalized CLI options.
 - `printHelp()`: writes CLI usage and product positioning to stdout.
 - `initMap(options)`: creates a semantic map template when the target map file does not already exist.
 - `configure(options)`: writes provider, API URL, API key, and model config; `show` prints a masked summary, `set` writes non-interactively and infers provider from API URL, TTY mode opens a keyboard menu, and non-TTY mode falls back to plain prompts.
@@ -52,6 +56,7 @@ map is a working contract for agentic code modification.
 - `inferProviderId(apiUrl)`: maps known provider API URLs to provider ids, otherwise returns `manual`.
 - `promptConfigValue(label, current)`: temporarily uses readline prompts to edit one selected config field.
 - `scanRepo(options)`: builds a product-level repository scan and prints text or JSON; with `--llm`, coordinates parallel reviewer model calls to produce a complete semantic map, and with `--write`, writes it to disk.
+- `semanticMap(options)`: runs the function-level semantic extraction pipeline, writes the updated `CODEMAP.md`, and persists the local semantic cache.
 - `writeMap(options)`: writes a baseline semantic map generated from current repository structure.
 - `askCodebase(options)`: sends a codebase question to the configured chat-completions API with map and scan context; uses SSE streaming when `--stream` is present.
 - `planChange(options)`: sends a change request to the configured chat-completions API and asks for a safe implementation plan without file edits; uses SSE streaming when `--stream` is present and writes the plan to `outPath` when `--write` is present.
@@ -61,6 +66,7 @@ map is a working contract for agentic code modification.
 - `summarize(files)`: counts languages and detects likely entry files.
 - `buildScanReport(options)`: builds the structured scan report for source inventory, CLI commands, config, semantic maps, package scripts, CI, module roles, and git state.
 - `formatScan(report)`: formats a human-readable product-level repository scan.
+- `runSemanticMap(options)`: builds the AST/LSP function inventory, queues worker tasks, reuses cached analyses, writes the detailed function map, and persists `.codetalk/semantic/manifest.json`.
 - `scanConfigState()`: reports config file presence and relevant environment variable presence without printing secrets.
 - `scanSemanticMaps(options)`: reports candidate semantic map files and whether they appear stale relative to source mtimes.
 - `scanPackageInfo(cwd)`: reads package name, version, binaries, and scripts from `package.json`.
@@ -69,6 +75,8 @@ map is a working contract for agentic code modification.
 - `inferSourceRole(path)`: maps common repository paths to user-facing responsibilities.
 - `unique(values)`: removes duplicate map candidates.
 - `normalizeParallel(value)`: normalizes `--parallel` to an integer of at least 1.
+- `semanticExtractionSystemPrompt()`: returns the system prompt that tells the model to prefer observed code over docstrings when extracting function semantics.
+- `semanticExtractionPrompt(params)`: builds the per-function prompt that includes source excerpts, surrounding context, inventory metadata, and the expected JSON schema.
 - `splitFilesForAgents(files, parallel)`: balances source files across reviewer chunks by byte size.
 - `runLimited(tasks, parallel)`: executes async tasks with a bounded concurrency limit while preserving result order.
 - `buildMap(root, files)`: builds a baseline semantic map with architecture, module placeholders, and agent protocol.
@@ -124,7 +132,9 @@ map is a working contract for agentic code modification.
 11. `codetalker sync --stream` writes local progress lines while reading changes, replacing the sync section, and writing the map.
 12. `codetalker sync --llm --stream` refreshes the local change checklist, sends changed-file evidence to the configured API, streams the model output, and writes the returned complete semantic map.
 13. `codetalker scan` reports repository shape, CLI command surface, config state, semantic map status, package scripts, CI, module roles, and git changed-path count.
-14. GitHub Actions runs npm install, typecheck, build, smoke tests, and package dry-run on pushes and pull requests.
+14. `codetalker semantic --parallel N` queues one semantic worker per queued function or method up to `N`, reuses unchanged cache entries, and rewrites the detailed `## Functions` section in `CODEMAP.md`.
+15. `codetalker semantic --parallel MAX` fans out to one worker per function or method, capped at 40 concurrent workers, and stores the resulting cache in `.codetalk/semantic/`.
+16. GitHub Actions runs npm install, typecheck, build, smoke tests, and package dry-run on pushes and pull requests.
 
 ## Side Effects
 
@@ -139,6 +149,7 @@ map is a working contract for agentic code modification.
 - `codetalker scan --llm` sends repository file lists, reviewer shard evidence, reviewer outputs, and the existing map to the configured API URL across coordinator, reviewer, and merger requests.
 - `codetalker scan --llm --write` writes the model-returned complete semantic map to the configured map path.
 - `codetalker sync --llm` sends changed-file evidence and the current map to the configured API URL, then writes the returned complete semantic map.
+- `codetalker semantic` sends one prompt per function or method to the configured API URL, reuses unchanged cache entries, writes the detailed function section to `CODEMAP.md`, and saves the structured cache under `.codetalk/semantic/`.
 - `codetalker ask --stream` and `codetalker plan --stream` keep an HTTP response stream open and write incremental output to stdout.
 - `codetalker scan --llm --stream` and `codetalker sync --llm --stream` keep an HTTP response stream open and write incremental model output to stdout.
 - Non-streaming LLM calls write start, wait, elapsed-time, response-read, and completion progress to stderr so long-running commands do not appear hung.

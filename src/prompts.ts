@@ -1,4 +1,4 @@
-import type { CliOptions, ScanReport, SourceFile } from "./types.js";
+import type { CliOptions, SourceFile } from "./types.js";
 import type { ToolDef } from "./tools/index.js";
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -353,152 +353,102 @@ ${repositoryEvidence}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// scan  –  Inspection-plan prompt (coordinator agent)
+// semantic  –  Function-level semantic extraction
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export function buildInspectionPlanPrompt(report: ScanReport, existingMap: string): string {
-  return `You are Codetalker coordinator agent.
-
-Goal:
-- List every source file that must be inspected.
-- Identify likely entrypoints, important modules, and inspection priorities.
-- Do not summarize architecture yet; create an inspection plan for reviewer agents.
+export function semanticExtractionSystemPrompt(): string {
+  return `You are Codetalker extracting function-level semantics from source code.
 
 Rules:
-- Return concise markdown.
-- Include every source file path from the file list.
-- Explicitly call out files that are likely high priority.
-
-Existing semantic map:
-${existingMap}
-
-Repository scan:
-${reportSummary(report)}
-
-All source files:
-${report.files.map((file) => `- ${file.path} (${file.language}, ${file.bytes} bytes)`).join("\n") || "- No source files detected."}`;
+- Prefer observed code over docstrings, comments, and names.
+- Use the code excerpt and surrounding context as the source of truth.
+- Be precise about inputs, outputs, side effects, failure modes, and call relationships.
+- If the function is a method, include its owning class and any inheritance context.
+- Return valid JSON only. Do not wrap the response in markdown fences.`;
 }
 
-/** Internal helper: produces a one-liner summary of the scan report. */
-function reportSummary(report: ScanReport): string {
-  const langSummary = Object.entries(report.source.languages)
-    .map(([lang, count]) => `${lang}: ${count}`)
-    .join(", ");
-  return `Root: ${report.root} | Files: ${report.source.count} | Languages: ${langSummary || "none"}`;
-}
+export function semanticExtractionPrompt(params: {
+  filePath: string;
+  language: string;
+  kind: "function" | "method";
+  name: string;
+  qualifiedName: string;
+  owner?: string;
+  siblingMembers: string[];
+  fileImports: string[];
+  fileFunctions: string[];
+  fileTypes: string[];
+  sourceExcerpt: string;
+  contextExcerpt: string;
+}): string {
+  const {
+    filePath,
+    language,
+    kind,
+    name,
+    qualifiedName,
+    owner,
+    siblingMembers,
+    fileImports,
+    fileFunctions,
+    fileTypes,
+    sourceExcerpt,
+    contextExcerpt
+  } = params;
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// scan  –  Depth-based reviewer prompts: analyze a single source file
-// ═══════════════════════════════════════════════════════════════════════════════
+  return `Extract a detailed semantic record for this symbol.
 
-/** Low depth — just ROLE identification, 1 sentence. */
-export function reviewerPromptLow(
-  file: SourceFile,
-  content: string
-): string {
-  return `You are Codetalker file analyzer.
+Return JSON with exactly these string-array fields:
+- purpose: a concise sentence describing what the symbol does
+- inputs: ordered list of inputs and how the function uses them
+- outputs: ordered list of outputs / return semantics
+- sideEffects: ordered list of side effects, state changes, network calls, and I/O
+- failureModes: ordered list of failure cases, error paths, and preconditions
+- calls: ordered list of dependencies this symbol calls
+- calledBy: ordered list of likely reverse dependencies visible from the local context
+- ownershipContext: ownership / module / class context in one or two sentences
+- inheritanceContext: inheritance or interface context in one or two sentences, or "none observed"
+- notes: any extra observations worth preserving
 
-For this file output:
-ROLE: <one sentence about its role — what this file does within the project>
+File path: ${filePath}
+Language: ${language}
+Symbol kind: ${kind}
+Symbol name: ${name}
+Qualified name: ${qualifiedName}
+Owning class or container: ${owner || "none"}
 
-Keep the ROLE to exactly one sentence. No other output.
+Local file inventory:
+- Imports: ${fileImports.length > 0 ? fileImports.join(", ") : "none"}
+- Functions: ${fileFunctions.length > 0 ? fileFunctions.join(", ") : "none"}
+- Types: ${fileTypes.length > 0 ? fileTypes.join(", ") : "none"}
+- Nearby members: ${siblingMembers.length > 0 ? siblingMembers.join(", ") : "none"}
 
-File: ${file.path} (${file.language}, ${file.bytes} bytes)
-
+Observed source excerpt:
 \`\`\`
-${content}
-\`\`\``;
-}
-
-/** Medium depth — current implementation: ROLE, EXPORTS, IMPORTS, FUNCTIONS, TYPES. */
-export function reviewerPromptMedium(
-  file: SourceFile,
-  content: string,
-  inspectionPlan: string
-): string {
-  return `You are Codetalker file analyzer.
-
-For this file output:
-ROLE: <one sentence about its role>
-EXPORTS: <comma-separated list of exported symbols>
-IMPORTS: <comma-separated list of import sources>
-FUNCTIONS: <comma-separated list of function names with brief purpose in parentheses>
-TYPES: <comma-separated list of type/class names>
-
-Keep each field concise. No explanations or descriptions beyond what's requested.
-
-File: ${file.path} (${file.language}, ${file.bytes} bytes)
-
+${sourceExcerpt}
 \`\`\`
-${content}
-\`\`\``;
-}
 
-/** High depth — full semantic: function signatures, class members, types/decorators. */
-export function reviewerPromptHigh(
-  file: SourceFile,
-  content: string,
-  inspectionPlan: string
-): string {
-  return `You are Codetalker file analyzer.
-
-For this file output the following fields. Be precise and concise.
-
-ROLE: <one sentence about its role>
-EXPORTS: <comma-separated list of exported symbols>
-IMPORTS: <comma-separated list of import sources>
-FUNCTIONS: <for each exported function: name, argument types, return type>
-CLASSES: <for each class: name, methods (signatures), instance variables, data fields>
-INTERFACES: <for each interface/type-alias: name and key fields (for TS/Java)>
-DECORATORS: <any decorators applied to classes, methods, or fields>
-
-File: ${file.path} (${file.language}, ${file.bytes} bytes)
-
+Surrounding context:
 \`\`\`
-${content}
-\`\`\``;
-}
-
-/** Full depth — everything in HIGH plus control flow, APIs, errors, async. */
-export function reviewerPromptFull(
-  file: SourceFile,
-  content: string,
-  inspectionPlan: string
-): string {
-  return `You are Codetalker file analyzer.
-
-For this file output the following fields. Be precise and concise.
-
-ROLE: <one sentence about its role>
-EXPORTS: <comma-separated list of exported symbols>
-IMPORTS: <comma-separated list of import sources>
-FUNCTIONS: <for each exported function: name, argument types, return type>
-CLASSES: <for each class: name, methods (signatures), instance variables, data fields>
-INTERFACES: <for each interface/type-alias: name and key fields>
-DECORATORS: <any decorators applied to classes, methods, or fields>
-CONTROL_FLOW: <description of the main control flow and branching logic>
-API_INTERFACES: <API endpoint definitions, request/response shapes, HTTP methods>
-ERROR_HANDLING: <error handling patterns: try/catch, error types, fallback logic>
-ASYNC_PATTERNS: <async/await patterns, Promise chains, concurrency handling>
-
-File: ${file.path} (${file.language}, ${file.bytes} bytes)
-
-\`\`\`
-${content}
+${contextExcerpt}
 \`\`\``;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// scan  –  Merger prompt: synthesize per-file analyses into final map
+// scan  –  Merger prompt: synthesize LSP- or AST-extracted symbols into map
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * Merger prompt for the LLM to synthesize symbol index data into
+ * a complete semantic map. The perFileAnalyses block always contains
+ * the fullest available symbol data (from LSP when possible, or regex
+ * fallback).
+ */
 export function mergerPrompt(
   existingMap: string,
   reportSummary: string,
-  inspectionPlan: string,
-  perFileAnalyses: string,
+  indexBlock: string,
   mapPath: string,
-  depth: string = "medium",
   section?: string
 ): string {
   if (section) {
@@ -518,24 +468,18 @@ ${existingMap}
 Repository scan:
 ${reportSummary}
 
-Coordinator inspection plan:
-${inspectionPlan}
-
-Per-file analyses (source index):
-${perFileAnalyses}`;
+Symbol index (extracted via Language Server Protocol when available):
+${indexBlock}`;
   }
-
-  const sections = depth === "full" || depth === "high"
-    ? fullDepthSections()
-    : mediumDepthSections();
 
   return `You are Codetalker — a senior software architect producing a living semantic map.
 
 Goal:
-- Synthesize the per-file analyses below into a complete, accurate semantic map that can be written to ${mapPath}.
+- Synthesize the per-file symbol index below into a complete, accurate semantic map that can be written to ${mapPath}.
 - This is NOT passive documentation. It is the behavioral contract that AI coding agents will read before modifying code. Every detail matters.
+- Use the hierarchical symbol structure (classes, interfaces, functions with their nested methods and fields) to infer architectural relationships.
 
-${sections}
+${fullDepthSections()}
 
 Existing semantic map:
 ${existingMap}
@@ -543,11 +487,8 @@ ${existingMap}
 Repository scan:
 ${reportSummary}
 
-Coordinator inspection plan:
-${inspectionPlan}
-
-Per-file analyses:
-${perFileAnalyses}`;
+Symbol index (extracted via Language Server Protocol when available):
+${indexBlock}`;
 }
 
 function sectionRequirements(section: string): string {
@@ -606,27 +547,6 @@ For each flow, list the steps in order.`,
   return reqs[section] || "Be thorough and precise about this section.";
 }
 
-function mediumDepthSections(): string {
-  return `Rules:
-- Return markdown only, starting with "# Code Semantic Map".
-- Include these stable sections: Architecture, Modules, Types, Functions, Runtime Flow, Side Effects, Agent Change Protocol, Change Sync.
-
-For each section:
-- Architecture: Describe what the system does, its main execution path, major components, scale, and design philosophy.
-- Modules: List every module/file with its role, responsibilities, and collaborators in a table.
-- Types: Document each type with purpose, fields, and invariants.
-- Functions: For every function or method, record: purpose, inputs, outputs, side effects, preconditions, postconditions, failure modes.
-- Runtime Flow: Document startup, normal execution paths, error paths, and teardown.
-- Side Effects: List files written, files read, network calls, process spawning, state changes, caches.
-- Agent Change Protocol: Define the before/during/after editing contract.
-- Change Sync: Initialize the change tracking section.
-
-Quality standards:
-- Be precise about behavior, not just intent.
-- Distinguish observed code behavior from inference when ambiguous.
-- Prefer concise bullet lists or tables when they improve scanability.\n\n`;
-}
-
 function fullDepthSections(): string {
   return `Output the semantic map with these sections:
 
@@ -681,7 +601,9 @@ Document each major execution path:
 - Data sinks: outputs, files written, database writes
 - Caching: what is cached, cache lifetime, invalidation
 
-Keep the format as markdown with stable headings. Use tables where they improve scanability. Be precise about behavior, not just intent.`;
+Keep the format as markdown with stable headings. Use tables where they improve scanability. Be precise about behavior, not just intent.
+- Distinguish observed code behavior from inference when ambiguous.
+- Prefer concise bullet lists or tables when they improve scanability.`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

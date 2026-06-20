@@ -5,6 +5,7 @@ import {
   configure,
   initMap,
   scanRepo,
+  semanticMap,
   writeMap,
   askCodebase,
   planChange,
@@ -48,6 +49,11 @@ async function main(): Promise<void> {
 
   if (command === "scan") {
     await scanRepo(options);
+    return;
+  }
+
+  if (command === "semantic") {
+    await semanticMap(options);
     return;
   }
 

@@ -9,6 +9,7 @@ behavior.
 - What the system does
 - Main execution path
 - Major components and dependencies
+- Distinguish broad architecture scans from detailed function-level semantic passes
 
 ## Modules
 
@@ -28,6 +29,8 @@ For each function or method:
 - side effects
 - preconditions
 - postconditions
+- call relationships
+- ownership / inheritance context
 
 ## Runtime Flow
 
@@ -42,12 +45,13 @@ For each function or method:
 - network calls
 - state changes
 - caches or temporary artifacts
+- if applicable, project-local semantic caches under `.codetalk/semantic/`
 
 ## Agent Change Protocol
 
 - Before editing: read this map and the source files relevant to the request.
 - During editing: treat this map as the current behavioral contract unless source inspection proves it stale.
-- After editing: update changed module, function, runtime-flow, and side-effect sections in the same change.
+- After editing: update changed module, function, runtime-flow, side-effect, and semantic-cache sections in the same change.
 - If code and map disagree: trust observed code, then repair the map before relying on it for further edits.
 
 ## Change Sync

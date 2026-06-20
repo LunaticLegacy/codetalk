@@ -4,6 +4,7 @@ import { join, relative, resolve } from "node:path";
 import { SOURCE_EXTENSIONS, IGNORED_DIRS } from "./constants.js";
 import { createGitignoreMatcher, getExtension, normalizePath } from "./utils.js";
 import { extractSymbols } from "./ast/index.js";
+import type { LspPoolResult } from "./lsp/types.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -25,16 +26,36 @@ export interface FileSymbols {
 /**
  * Walk source files under `cwd` and build a symbol index.
  *
- * Files and directories ignored by Git are skipped before any AST extraction
+ * When an LspPoolResult is provided, its data is used for files that
+ * were successfully extracted via LSP. Files without LSP coverage fall
+ * back to the regex-based AST extractors.
+ *
+ * Files and directories ignored by Git are skipped before any extraction
  * runs so the index mirrors the same visibility rules as the file collectors.
  */
-export function buildSymbolIndex(cwd: string): SymbolIndex {
+export function buildSymbolIndex(cwd: string, lspResult?: LspPoolResult): SymbolIndex {
   const index: SymbolIndex = { files: {} };
   const isIgnored = createGitignoreMatcher(cwd);
 
   walkSourceFiles(cwd, isIgnored, (relPath, absPath, ext) => {
     const language = SOURCE_EXTENSIONS.get(ext) ?? "Source";
     const size = statSync(absPath).size;
+
+    // Prefer LSP result when available
+    const lspFile = lspResult?.files[normalizePath(relPath)];
+    if (lspFile?.usedLsp) {
+      index.files[normalizePath(relPath)] = {
+        exports: lspFile.exports,
+        imports: lspFile.imports,
+        functions: lspFile.functions,
+        types: lspFile.types,
+        size,
+        language
+      };
+      return;
+    }
+
+    // Fallback to regex-based AST extraction
     const symbols = extractSymbols(absPath, ext);
     index.files[normalizePath(relPath)] = {
       exports: symbols.exports,

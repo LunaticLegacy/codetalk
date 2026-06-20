@@ -1,30 +1,25 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 // TUI (interactive config) is loaded lazily from ./tui/config.js
 import { createInterface } from "node:readline/promises";
 
 import type { CliOptions, ScanReport, SourceFile } from "./types.js";
 import { MissionPanel } from "./panel.js";
-import { callChatCompletion, callWithTools, runPrompt, runPromptCapture } from "./api.js";
+import { callChatCompletion, callWithTools, runPrompt, runPromptCapture, streamChatCompletion } from "./api.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import {
   askSystemPrompt,
   buildAgentPrompt as promptsBuildAgentPrompt,
-  buildInspectionPlanPrompt,
   createExecCoordPrompt,
   createExecEditorPrompt,
   gatekeeperPrompt,
   mergerPrompt,
   planSystemPrompt,
   retryEditorPrompt,
-  reviewerPromptLow,
-  reviewerPromptMedium,
-  reviewerPromptHigh,
-  reviewerPromptFull,
   semanticSyncPrompt
 } from "./prompts.js";
+import { runSemanticMap } from "./semantic.js";
 import {
   buildMap,
   buildTemplate,
@@ -48,11 +43,12 @@ import {
   replaceSection,
   requireMessage,
   runLimited,
-  splitFilesForAgents,
   streamProgress,
   trimTrailingSlash
 } from "./utils.js";
 import { buildSymbolIndex, loadIndex, saveIndex } from "./indexer.js";
+import { LspPool } from "./lsp/pool.js";
+import type { LspDocumentSymbol, LspExtractionResult } from "./lsp/types.js";
 import {
   COMMANDS,
   SOURCE_EXTENSIONS,
@@ -157,12 +153,6 @@ export async function scanRepo(options: CliOptions): Promise<void> {
   const result = await runArchitectureScan(options, report);
   writeSemanticMap(options, result);
   console.log(`Wrote LLM semantic map: ${normalizePath(relative(options.cwd, resolve(options.cwd, options.mapPath)))}`);
-
-  // Build and save symbol index after scan
-  streamProgress(options, "Building file symbol index...");
-  const index = buildSymbolIndex(options.cwd);
-  saveIndex(options.cwd, index);
-  console.log(`Indexed ${Object.keys(index.files).length} source files in .codetalk/index.json`);
 }
 
 // ── map ──────────────────────────────────────────────────────────────────────
@@ -174,6 +164,12 @@ export function writeMap(options: CliOptions): void {
   ensureParentDirectory(target);
   writeFileSync(target, buildMap(options.cwd, files), "utf8");
   console.log(`Wrote semantic map: ${relative(options.cwd, target)}`);
+}
+
+// ── semantic ────────────────────────────────────────────────────────────────
+
+export async function semanticMap(options: CliOptions): Promise<void> {
+  await runSemanticMap(options);
 }
 
 // ── sync ─────────────────────────────────────────────────────────────────────
@@ -583,7 +579,7 @@ export function rollbackTo(cwd: string, backupId: string): void {
     console.log("Restored " + rCount + " file" + (rCount === 1 ? "" : "s") + " from backup " + backupId + ":");
     for (const f of restored) console.log("  R " + f);
   }
-}// ── Architecture scan (coordinator + reviewers + merger) ─────────────────────
+}// ── Architecture scan (LSP → index → LLM synthesis) ──────────────────────
 
 export async function runArchitectureScan(options: CliOptions, report: ScanReport): Promise<string> {
   const panel = new MissionPanel();
@@ -592,116 +588,107 @@ export async function runArchitectureScan(options: CliOptions, report: ScanRepor
     ? readFileSync(resolve(options.cwd, options.mapPath), "utf8")
     : buildTemplate();
 
-  panel.add("indexer", "Extracting symbols via AST...");
-  const astIndex = buildSymbolIndex(options.cwd);
+  // Phase 1: Detect available LSP servers and extract symbols
+  const lspPool = new LspPool(options.cwd);
+  const detected = lspPool.detectedServers;
+
+  const filesForLsp = report.files.map((f) => ({
+    path: f.path,
+    ext: getExtension(f.path)
+  }));
+
+  panel.add("lsp", `Detected LSP servers: ${detected.join(", ") || "none"}`);
+  panel.add("indexer", "Extracting symbols via LSP...");
+
+  let lspResult;
+  try {
+    lspResult = await lspPool.extractAll(filesForLsp);
+    const lspCount = Object.values(lspResult.files).filter((r) => r.usedLsp).length;
+    const fallbackCount = Object.values(lspResult.files).filter((r) => !r.usedLsp).length;
+    const failSummary = lspResult.serversFailed.length > 0
+      ? ` (${lspResult.serversFailed.join("; ")})`
+      : "";
+    panel.done("lsp", `${lspResult.serversUsed.join(", ") || "no LSP"} | ${lspCount} files via LSP${fallbackCount > 0 ? `, ${fallbackCount} via fallback` : ""}${failSummary}`);
+  } finally {
+    await lspPool.shutdownAll();
+  }
+
+  // Phase 2: Build the old-style symbol index for backward compatibility
+  // (Uses LSP results when available, falls back to regex)
+  const astIndex = buildSymbolIndex(options.cwd, lspResult);
   saveIndex(options.cwd, astIndex);
   panel.done("indexer", `Indexed ${Object.keys(astIndex.files).length} files`);
 
+  // Phase 3: Build compact index block from LSP data (falling back to AST index)
   panel.add("merger", "Reading index and synthesizing semantic map...");
 
-  // Build compact index block from fresh AST data
-  const indexBlock = Object.entries(astIndex.files).map(([path, info]) =>
-    `- ${path} (${info.language}, ${info.size}b)` +
-    (info.functions?.length ? ` funcs: ${info.functions.join(", ")}` : "") +
-    (info.types?.length ? ` types: ${info.types.join(", ")}` : "") +
-    (info.imports?.length ? ` imports: ${info.imports.join(", ")}` : "")
-  ).join("\n");
+  const indexBlock = report.files.map((f) => {
+    const lspFileResult = lspResult?.files[f.path];
+    const astInfo = astIndex.files[f.path];
 
-  const depth = options.depth || "medium";
-
-  let result: string;
-  if (depth === "full" || depth === "high") {
-    // Split merger: write each section in parallel with its own agent line
-    const sections = ["API Surface", "Classes", "Interfaces", "Functions", "Execution Flows", "Data Flow"];
-    const sectionSlug = (s: string) => s.replace(/\s+/g, "-").toLowerCase();
-
-    for (const s of sections) {
-      panel.add(`section:${sectionSlug(s)}`, `Waiting...`);
+    if (lspFileResult && lspFileResult.usedLsp && lspFileResult.symbols.length > 0) {
+      // Hierarchical LSP output
+      const hierarchy = formatLspSymbols(lspFileResult.symbols, 0);
+      return `- ${f.path} (${f.language}, ${f.bytes}b) [LSP: ${lspFileResult.serverName}]\n` +
+        hierarchy +
+        (lspFileResult.functions.length ? `  funcs: ${lspFileResult.functions.join(", ")}\n` : "") +
+        (lspFileResult.types.length ? `  types: ${lspFileResult.types.join(", ")}\n` : "");
     }
 
-    const sectionTasks = sections.map((section) => async () => {
-      const agentId = `section:${sectionSlug(section)}`;
-      panel.update(agentId, `Writing...`);
-      const sectionPrompt = mergerPrompt(existingMap, formatScan(report), "", indexBlock, options.mapPath, depth, section);
-      const { content } = await callChatCompletion(options, sectionPrompt, panel, agentId, section);
-      panel.done(agentId, `Written`);
-      return `## ${section}\n\n${content.trim()}`;
-    });
+    // Fallback: flat AST index
+    if (astInfo) {
+      return `- ${f.path} (${f.language}, ${f.bytes}b)` +
+        (astInfo.functions?.length ? ` funcs: ${astInfo.functions.join(", ")}` : "") +
+        (astInfo.types?.length ? ` types: ${astInfo.types.join(", ")}` : "") +
+        (astInfo.imports?.length ? ` imports: ${astInfo.imports.join(", ")}` : "");
+    }
 
-    const sectionResults = await runLimited(sectionTasks, 6);
-    result = `# Code Semantic Map\n\n${sectionResults.join("\n\n")}`;
-  } else {
-    const prompt = mergerPrompt(existingMap, formatScan(report), "", indexBlock, options.mapPath, depth);
-    const { content: mapResult, tokenStr: mergerTokens } = await callChatCompletion(options, prompt, panel, "merger", "Synthesizing map");
-    result = sanitizeMarkdownMap(mapResult);
-    panel.done("merger", "Semantic map generated");
-  }
+    return `- ${f.path} (${f.language}, ${f.bytes}b)`;
+  }).join("\n");
+
+  // Phase 3: Single-section merger for full-depth synthesis
+  const prompt = mergerPrompt(existingMap, formatScan(report), indexBlock, options.mapPath);
+  // In --stream mode, keep the live merger text on stdout so it does not
+  // fight the stderr-based MissionPanel redraws.
+  panel.update("merger", options.stream ? "Streaming merger response..." : "Synthesizing map");
+  const mapResult = options.stream
+    ? await streamChatCompletion(options, prompt, "stdout")
+    : (await callChatCompletion(options, prompt, panel, "merger", "Synthesizing map")).content;
+  const result = sanitizeMarkdownMap(mapResult);
+  panel.done("merger", "Semantic map generated");
 
   panel.finish();
 
   return result;
 }
 
-export async function buildInspectionPlan(options: CliOptions, report: ScanReport, existingMap: string, panel?: MissionPanel): Promise<{ content: string; tokenStr: string }> {
-  const prompt = buildInspectionPlanPrompt(report, existingMap);
-
-  const { content: planContent, tokenStr: planTokens } = await callChatCompletion(options, prompt, panel, panel ? "coordinator" : undefined, panel ? "Planning inspection" : undefined);
-  return { content: planContent, tokenStr: planTokens };
+/** Format hierarchical LSP DocumentSymbols as indented text. */
+function formatLspSymbols(symbols: LspDocumentSymbol[], depth: number): string {
+  const indent = "  ".repeat(depth + 1);
+  let result = "";
+  for (const sym of symbols) {
+    const kindLabel = symbolKindLabel(sym.kind);
+    result += `${indent}${kindLabel} ${sym.name}`;
+    if (sym.detail) result += `: ${sym.detail}`;
+    result += "\n";
+    if (sym.children && sym.children.length > 0) {
+      result += formatLspSymbols(sym.children, depth + 1);
+    }
+  }
+  return result;
 }
 
-export async function runReviewerAgents(options: CliOptions, chunks: SourceFile[][], inspectionPlan: string, panel?: MissionPanel): Promise<{ tmpDir: string; analysisFiles: string[] }> {
-  const tmpDir = mkdtempSync(join(tmpdir(), "codetalk-scan-"));
-  const analysisFiles: string[] = [];
-
-  // Select the reviewer prompt function based on scan depth
-  const promptFn = (file: SourceFile, content: string): string => {
-    switch (options.depth) {
-      case "low": return reviewerPromptLow(file, content);
-      case "high": return reviewerPromptHigh(file, content, inspectionPlan);
-      case "full": return reviewerPromptFull(file, content, inspectionPlan);
-      case "medium":
-      default: return reviewerPromptMedium(file, content, inspectionPlan);
-    }
+function symbolKindLabel(kind: number): string {
+  const labels: Record<number, string> = {
+    1: "File", 2: "Module", 3: "Namespace", 4: "Package",
+    5: "Class", 6: "Method", 7: "Property", 8: "Field",
+    9: "Ctor", 10: "Enum", 11: "Interface", 12: "Func",
+    13: "Var", 14: "Const", 15: "String", 16: "Number",
+    17: "Bool", 18: "Array", 19: "Object", 20: "Key",
+    21: "Null", 22: "EnumMember", 23: "Struct", 24: "Event",
+    25: "Operator", 26: "TypeParam"
   };
-
-  const tasks = chunks.map((chunk, index) => async () => {
-    const agentId = `reviewer ${index + 1}`;
-    const fileAnalysisPaths: string[] = [];
-    let lastTokenStr = "";
-
-    for (let fi = 0; fi < chunk.length; fi++) {
-      const file = chunk[fi];
-      const fileNum = `${fi + 1}/${chunk.length}`;
-
-      panel?.update(agentId, `Reading file ${fileNum}: ${file.path}...`);
-
-      const fullPath = resolve(options.cwd, file.path);
-      const content = existsSync(fullPath)
-        ? readFileSync(fullPath, "utf8").slice(0, 24_000)
-        : "(file not found)";
-
-      const prompt = promptFn(file, content);
-
-      const { content: analysis, tokenStr } = await callChatCompletion(options, prompt, panel, agentId, `File ${fileNum}: ${file.path}`);
-      lastTokenStr = tokenStr;
-
-      const tmpPath = join(tmpDir, `reviewer-${index + 1}-file-${fi}-${sanitizePath(file.path)}.md`);
-      writeFileSync(tmpPath, analysis, "utf8");
-      fileAnalysisPaths.push(tmpPath);
-      analysisFiles.push(tmpPath);
-
-      panel?.update(agentId, `\u2713 ${file.path}`);
-    }
-
-    panel?.done(agentId, `${chunk.length} file${chunk.length === 1 ? "" : "s"} analyzed${lastTokenStr}`);
-  });
-
-  await runLimited(tasks, options.parallel);
-  return { tmpDir, analysisFiles };
-}
-
-function sanitizePath(p: string): string {
-  return p.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return labels[kind] ?? "Symbol";
 }
 
 /** Strip markdown code fences from LLM output that should be raw file content. */

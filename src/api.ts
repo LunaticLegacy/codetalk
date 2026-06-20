@@ -6,6 +6,7 @@ import { executeTool } from "./tools/index.js";
 import { systemPrompt } from "./prompts.js";
 import { LlmPortal } from "./llm/index.js";
 import type { LlmMessage, LlmToolDef, LlmToolCall } from "./llm/types.js";
+import { GREEN, RESET } from "./constants.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 180_000;
 
@@ -44,14 +45,24 @@ export async function callChatCompletion(options: CliOptions, prompt: string, pa
 // ── Chat completion (streaming, single prompt) ────────────────────────────────
 
 /**
- * Stream a single-prompt request and write output to stdout.
+ * Stream a single-prompt request and write output to a terminal stream.
  *
- * Handles both text streaming and tool call rendering.
+ * Handles both text streaming and tool call rendering. When the selected
+ * output stream supports ANSI colors, streamed text is colorized so verbose
+ * scan/ask/plan sessions stay readable. Scan routes the merger stream to
+ * stdout so the live model output stays separate from the stderr progress
+ * panel.
+ *
  * Returns the full accumulated content.
  */
-export async function streamChatCompletion(options: CliOptions, prompt: string): Promise<string> {
+export async function streamChatCompletion(options: CliOptions, prompt: string, outputTarget: "stdout" | "stderr" = "stdout"): Promise<string> {
   const config = readConfig(options);
   const portal = new LlmPortal(config, readRequestTimeoutMs(options.timeout));
+  const output = outputTarget === "stderr" ? process.stderr : process.stdout;
+  const supportsAnsi = output.isTTY === true;
+  const cyan = supportsAnsi ? "\x1b[36m" : "";
+  const magenta = supportsAnsi ? "\x1b[35m" : "";
+  const reset = supportsAnsi ? "\x1b[0m" : "";
 
   const response = await fetch(`${trimTrailingSlash(config.apiUrl)}/chat/completions`, { method: "HEAD" }).catch(() => null);
 
@@ -68,11 +79,11 @@ export async function streamChatCompletion(options: CliOptions, prompt: string):
   })) {
     switch (event.type) {
       case "text":
-        process.stdout.write(event.text);
+        output.write(`${cyan}${event.text}${reset}`);
         fullContent += event.text;
         break;
       case "tool_call":
-        process.stdout.write(`\n[tool_call: ${event.toolCall.name}]\n`);
+        output.write(`\n${magenta}[tool_call: ${event.toolCall.name}]${reset}\n`);
         break;
       case "done":
         usage = event.usage;
@@ -80,7 +91,7 @@ export async function streamChatCompletion(options: CliOptions, prompt: string):
     }
   }
 
-  process.stdout.write("\n");
+  output.write("\n");
   showTokenUsage(usage);
   return fullContent;
 }
@@ -302,7 +313,7 @@ export function formatTokenUsage(usage: TokenUsage | undefined): string {
 export function showTokenUsage(usage: TokenUsage | undefined): void {
   const text = formatTokenUsage(usage);
   if (!text) return;
-  process.stderr.write(`[tokens]${text}\n`);
+  process.stderr.write(`${GREEN}[tokens]${RESET}${text}\n`);
 }
 
 // ── Progress tracking ────────────────────────────────────────────────────────
@@ -321,10 +332,10 @@ export function makePanelProgress(panel: MissionPanel, agentId: string, taskLabe
   const timer = setInterval(() => {
     if (!active) return;
     tick += 1;
-    const secs = (tick / 10).toFixed(1);
+    const secs = tick;
     const detailStr = currentDetail ? ` for ${currentDetail}` : "";
     panel.update(agentId, `${taskLabel}${detailStr} (${secs}s elapsed...)`);
-  }, 100);
+  }, 1000);
 
   const cb = (message: string | undefined): void => {
     if (message) {
