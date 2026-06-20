@@ -68,7 +68,7 @@ CODETALKER_MODEL=gpt-4.1
 |------|------|
 | `init` | 创建 `CODEMAP.md` 模板 |
 | `config` | 交互式 Provider/API 配置菜单 |
-| `scan [--depth low|medium|high|full]` | AST 提取 + LLM 合成 CODEMAP.md |
+| `scan [--depth low|medium|high|full]` | AST 提取 + LLM 合成 CODEMAP.md，并跳过 `.gitignore` 排除的路径 |
 | `map` | 从仓库结构生成基础语义图 |
 | `ask "问题"` | 使用工具探索 + LLM 回答代码库问题 |
 | `plan "需求" [--out FILE]` | 生成实施计划并写入磁盘 |

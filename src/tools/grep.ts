@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import type { ToolResult } from "./types.js";
 import { SKIP_DIRS } from "./shared.js";
+import { createGitignoreMatcher } from "../utils.js";
 import { loadIndex, searchIndex } from "../indexer.js";
 
 function isTextFile(filePath: string): boolean {
@@ -28,6 +29,12 @@ function tryExec(cmd: string, args: string[], cwd: string): string | null {
   }
 }
 
+/**
+ * Search text across repository files while skipping Git-ignored paths.
+ *
+ * When the symbol index is available, the tool narrows the search space first
+ * and still applies the same Git ignore filter before reading file contents.
+ */
 export function toolGrep(args: Record<string, any>, cwd: string): ToolResult {
   const pattern = String(args.pattern ?? "");
   if (!pattern) {
@@ -37,6 +44,7 @@ export function toolGrep(args: Record<string, any>, cwd: string): ToolResult {
   // If searchIndex is true, first narrow to relevant files using the symbol index
   const useSearchIndex = args.searchIndex === true || args.searchIndex === "true";
   let searchRelevantFiles: string[] | null = null;
+  const isIgnored = createGitignoreMatcher(cwd);
   if (useSearchIndex) {
     const index = loadIndex(cwd);
     if (index) {
@@ -77,7 +85,7 @@ export function toolGrep(args: Record<string, any>, cwd: string): ToolResult {
       const fullPath = resolve(cwd, filePath);
       let s: ReturnType<typeof statSync>;
       try { s = statSync(fullPath); } catch { continue; }
-      if (!s.isFile() || !isTextFile(filePath)) continue;
+      if (!s.isFile() || !isTextFile(filePath) || isIgnored(fullPath)) continue;
 
       try {
         const content = readFileSync(fullPath, "utf8");
@@ -114,13 +122,13 @@ export function toolGrep(args: Record<string, any>, cwd: string): ToolResult {
         try { s = statSync(fullPath); } catch { continue; }
 
         if (s.isDirectory()) {
-          if (!SKIP_DIRS.has(name)) {
+          if (!SKIP_DIRS.has(name) && !isIgnored(fullPath)) {
             walk(fullPath);
           }
           continue;
         }
 
-        if (!s.isFile() || !isTextFile(name)) continue;
+        if (!s.isFile() || !isTextFile(name) || isIgnored(fullPath)) continue;
 
         if (results.length >= maxResults) return;
 

@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -40,6 +40,7 @@ try {
   assertIncludes(mapped, "`index.ts`", "map records source module");
   assertIncludes(mapped, "Agent Change Protocol", "map includes agent protocol");
 
+  await testGitignoreRespect();
   await testNonStreamingTimeout();
   await testPlanWrite();
   run("check");
@@ -96,6 +97,25 @@ async function testPlanWrite() {
     const output = await runAsync("plan", "change this safely", "--out", "plans/next.md");
     assertIncludes(output, "Wrote plan: plans/next.md", "plan confirms plan write");
     assertIncludes(read(join(fixture, "plans", "next.md")), "LLM Architecture", "plan lands returned plan content");
+  }, { stream: false });
+}
+
+async function testGitignoreRespect() {
+  writeFileSync(join(fixture, ".gitignore"), "ignored.ts\nignored-dir/\n");
+  writeFileSync(join(fixture, "ignored.ts"), "export const ignored = true;\n");
+  mkdirSync(join(fixture, "ignored-dir"), { recursive: true });
+  writeFileSync(join(fixture, "ignored-dir", "nested.ts"), "export const nestedIgnored = true;\n");
+
+  await withMockServer(async (apiUrl) => {
+    run("config", "set", "--api-url", apiUrl, "--api-key", "test-secret", "--model", "test-model");
+    await runAsync("scan");
+
+    /** @type {{ files?: Record<string, unknown> }} */
+    const index = JSON.parse(read(join(fixture, ".codetalk", "index.json")));
+    const indexedPaths = Object.keys(index.files ?? {});
+    if (indexedPaths.includes("ignored.ts") || indexedPaths.some((path) => path.startsWith("ignored-dir/"))) {
+      throw new Error(`gitignore test failed: indexed paths included ignored files: ${indexedPaths.join(", ")}`);
+    }
   }, { stream: false });
 }
 

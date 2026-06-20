@@ -5,3 +5,5 @@ dist/
 .codetalk/
 CODEPLAN_BACKUP.md
 .npmrc
+.codex
+.agents

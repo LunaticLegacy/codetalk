@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { join, relative, resolve } from "node:path";
 
 import { SOURCE_EXTENSIONS, IGNORED_DIRS } from "./constants.js";
-import { getExtension, normalizePath } from "./utils.js";
+import { createGitignoreMatcher, getExtension, normalizePath } from "./utils.js";
 import { extractSymbols } from "./ast/index.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -24,11 +24,15 @@ export interface FileSymbols {
 
 /**
  * Walk source files under `cwd` and build a symbol index.
+ *
+ * Files and directories ignored by Git are skipped before any AST extraction
+ * runs so the index mirrors the same visibility rules as the file collectors.
  */
 export function buildSymbolIndex(cwd: string): SymbolIndex {
   const index: SymbolIndex = { files: {} };
+  const isIgnored = createGitignoreMatcher(cwd);
 
-  walkSourceFiles(cwd, (relPath, absPath, ext) => {
+  walkSourceFiles(cwd, isIgnored, (relPath, absPath, ext) => {
     const language = SOURCE_EXTENSIONS.get(ext) ?? "Source";
     const size = statSync(absPath).size;
     const symbols = extractSymbols(absPath, ext);
@@ -117,7 +121,11 @@ export function loadIndex(cwd: string): SymbolIndex | null {
 
 // ── Internal helpers ───────────────────────────────────────────────────────────
 
-function walkSourceFiles(cwd: string, cb: (relPath: string, absPath: string, ext: string) => void): void {
+function walkSourceFiles(
+  cwd: string,
+  isIgnored: (targetPath: string) => boolean,
+  cb: (relPath: string, absPath: string, ext: string) => void
+): void {
   function visit(dir: string): void {
     let entries: string[];
     try {
@@ -138,13 +146,14 @@ function walkSourceFiles(cwd: string, cb: (relPath: string, absPath: string, ext
       }
 
       if (s.isDirectory()) {
-        if (!IGNORED_DIRS.has(name)) {
+        if (!IGNORED_DIRS.has(name) && !isIgnored(fullPath)) {
           visit(fullPath);
         }
         continue;
       }
 
       if (!s.isFile()) continue;
+      if (isIgnored(fullPath)) continue;
 
       const ext = getExtension(name);
       if (!SOURCE_EXTENSIONS.has(ext)) continue;

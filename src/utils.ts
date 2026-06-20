@@ -9,9 +9,16 @@ import { loadIndex } from "./indexer.js";
 
 // ── File collection ───────────────────────────────────────────────────────────
 
+/**
+ * Collect source files from a repository while honoring `.gitignore` rules.
+ *
+ * The matcher prefers `git check-ignore` so nested ignore rules, negations, and
+ * directory patterns behave the same way Git does. If Git is unavailable, the
+ * helper falls back to parsing the root `.gitignore` file.
+ */
 export function collectSourceFiles(root: string): SourceFile[] {
   const files: SourceFile[] = [];
-  const gitignorePatterns = loadGitignore(root);
+  const isIgnored = createGitignoreMatcher(root);
 
   function visit(directory: string): void {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -23,7 +30,7 @@ export function collectSourceFiles(root: string): SourceFile[] {
       const fullPath = join(directory, entry.name);
 
       if (entry.isDirectory()) {
-        if (!IGNORED_DIRS.has(entry.name) && !isGitignored(gitignorePatterns, root, fullPath)) {
+        if (!IGNORED_DIRS.has(entry.name) && !isIgnored(fullPath)) {
           visit(fullPath);
         }
         continue;
@@ -34,7 +41,7 @@ export function collectSourceFiles(root: string): SourceFile[] {
       }
 
       // Skip files matched by .gitignore
-      if (isGitignored(gitignorePatterns, root, fullPath)) {
+      if (isIgnored(fullPath)) {
         continue;
       }
 
@@ -75,6 +82,18 @@ function loadGitignore(root: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
+}
+
+/**
+ * Create a matcher that reports whether a path is ignored by Git.
+ *
+ * The returned function accepts absolute paths so callers can reuse it while
+ * traversing a directory tree.
+ */
+export function createGitignoreMatcher(root: string): (targetPath: string) => boolean {
+  const patterns = loadGitignore(root);
+
+  return (targetPath: string) => isGitignored(patterns, root, targetPath);
 }
 
 /** Check if a file path matches any .gitignore pattern. */

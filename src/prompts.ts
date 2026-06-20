@@ -26,7 +26,7 @@ export function buildToolDefinitions(tools: ToolDef[]): string {
   const lines: string[] = [];
   lines.push("<tools>");
   lines.push("Available tools. When you need to explore the codebase, call a tool using either format:");
-  lines.push('Format 1: {"_tool": "name", "args": {...}}');
+  lines.push('Format 1: {"tool": "name", "args": {...}}');
   lines.push('Format 2: <functioncall><invoke name="name"><parameter name="k" string="true">v</parameter></invoke></functioncall>');
   lines.push("");
 

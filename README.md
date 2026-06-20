@@ -94,7 +94,7 @@ CODETALKER_MODEL=gpt-4.1
 
 ### AST-Based Scan
 
-codetalk scan uses language-specific AST extractors (no LLM) to index symbols, then sends a compact index to the LLM for synthesis:
+codetalk scan uses language-specific AST extractors (no LLM) to index symbols, skips `.gitignore`-excluded paths, then sends a compact index to the LLM for synthesis:
 
 ```
 scan ── collect files ── AST extract ── symbol index ── merger (LLM) ── CODEMAP.md

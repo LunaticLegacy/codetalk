@@ -1,6 +1,15 @@
 import { readFileSync } from "node:fs";
 import type { ScanDepth } from "./types.js";
 
+// ── ANSI styling (zero-dependency) ──────────────────────────────────────────
+
+const isTTY = process.stdout.isTTY === true;
+export const BOLD = isTTY ? "\x1b[1m" : "";
+export const DIM = isTTY ? "\x1b[2m" : "";
+export const UNDERLINE = isTTY ? "\x1b[4m" : "";
+export const RESET = isTTY ? "\x1b[0m" : "";
+const SEP = "─".repeat(48);
+
 const { version: VERSION } = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
 ) as { version: string };
@@ -122,166 +131,209 @@ export function printVersion(): void {
 }
 
 export function printSubcommandHelp(command: string): void {
-  const helps: Record<string, string> = {
-    init: `codetalk init - Create a semantic map template
-
-Usage:
-  codetalk init [--map CODEMAP.md]
-
-Flags:
-  --map PATH  Path to the semantic map (default: CODEMAP.md)`,
-
-    config: `codetalk config - Configure API URL, API key, and model
-
-Usage:
-  codetalk config
-  codetalk config set --api-url URL --api-key KEY [--model MODEL]
-  codetalk config show
-
-Interactive mode:
-  Run without arguments in a terminal to edit config with a keyboard menu.
-  In non-TTY shells, codetalk falls back to plain prompts.
-  Built-in providers: OpenAI, Anthropic, DeepSeek, OpenRouter, Manual.
-  Selecting a provider prompts for credentials and fetches available models when supported.
-
-Flags:
-  --api-url URL   LLM API endpoint
-  --api-key KEY   LLM API key
-  --model MODEL   LLM model name (default: gpt-4.1)`,
-
-    scan: `codetalk scan - Run parallel LLM reviewers to produce architecture semantics
-
-Usage:
-  codetalk scan [--json] [--depth low|medium|high|full] [--timeout MS]
-
-Flags:
-  --json          Output scan report as JSON
-  --depth LVL     Scan depth (low|medium|high|full, default: medium)
-  --depth LEVEL   Scan depth: low, medium, high, or full (default: medium)
-  --timeout MS    API request timeout in milliseconds (default: 180000)
-  --cwd PATH      Working directory
-  --api-url URL   LLM API endpoint
-  --api-key KEY   LLM API key
-  --model MODEL   LLM model name`,
-
-    map: `codetalk map - Generate a baseline semantic map from repo structure
-
-Usage:
-  codetalk map [--map CODEMAP.md]
-
-Flags:
-  --map PATH  Path to write the semantic map (default: CODEMAP.md)`,
-
-    ask: `codetalk ask - Answer codebase questions using LLM
-
-Usage:
-  codetalk ask "your question" [--stream]
-
-Flags:
-  --stream        Stream LLM response in real time
-  --cwd PATH      Working directory
-  --api-url URL   LLM API endpoint
-  --api-key KEY   LLM API key
-  --model MODEL   LLM model name`,
-
-    plan: `codetalk plan - Generate an implementation plan using LLM and write to disk
-
-Usage:
-  codetalk plan "change request" [--stream] [--out FILE]
-
-Flags:
-  --stream        Stream LLM response in real time
-  --out FILE      Plan output path (default: CODEPLAN.md)
-  --cwd PATH      Working directory
-  --api-url URL   LLM API endpoint
-  --api-key KEY   LLM API key
-  --model MODEL   LLM model name`,
-
-    exec: `codetalk exec - Execute a CODEPLAN.md: apply file changes in parallel via LLM
-
-Usage:
-  codetalk exec [--plan FILE] [--parallel N] [--stream] [--timeout MS]
-
-Flags:
-  --plan FILE     Plan file to execute (default: CODEPLAN.md)
-  --parallel N    Number of parallel file editors (default: 4)
-  --timeout MS    API request timeout in milliseconds (default: 180000)
-  --stream        Stream LLM responses in real time
-  --cwd PATH      Working directory
-  --api-url URL   LLM API endpoint
-  --api-key KEY   LLM API key
-  --model MODEL   LLM model name
-
-Note: exec automatically syncs the semantic map after applying changes.`,
-
-    check: `codetalk check - Fail if the semantic map is missing or older than source files
-
-Usage:
-  codetalk check [--map CODEMAP.md]
-
-Flags:
-  --map PATH  Path to the semantic map (default: CODEMAP.md)`,
-
-    version: `codetalk version - Print version and exit
-
-Usage:
-  codetalk version`
-  };
-
-  const text = helps[command];
-  if (text) {
-    console.log(text);
-  } else {
+  const entry = COMMAND_HELPS[command];
+  if (!entry) {
     printHelp();
+    return;
   }
+
+  const { title, usage, flags, note } = entry;
+  const lines: string[] = [];
+
+  lines.push(`${BOLD}${title}${RESET}`);
+  lines.push("");
+  lines.push(`${BOLD}Usage:${RESET}`);
+  lines.push(`  ${usage}`);
+  lines.push("");
+
+  if (flags.length > 0) {
+    lines.push(`${BOLD}Flags:${RESET}`);
+    const maxFlagLen = Math.max(...flags.map((f) => f.flag.length));
+    for (const f of flags) {
+      const padded = f.flag.padEnd(maxFlagLen + 2);
+      lines.push(`  ${BOLD}${padded}${RESET}${DIM}${f.desc}${RESET}`);
+    }
+    lines.push("");
+  }
+
+  if (note) {
+    lines.push(`${DIM}${note}${RESET}`);
+    lines.push("");
+  }
+
+  console.log(lines.join("\n"));
 }
 
+type HelpEntry = {
+  title: string;
+  usage: string;
+  flags: Array<{ flag: string; desc: string }>;
+  note?: string;
+};
+
+const COMMAND_HELPS: Record<string, HelpEntry> = {
+  init: {
+    title: "codetalk init — Create a semantic map template",
+    usage: "codetalk init [--map CODEMAP.md]",
+    flags: [{ flag: "--map PATH", desc: "Path to the semantic map (default: CODEMAP.md)" }]
+  },
+  config: {
+    title: "codetalk config — Configure API URL, API key, and model",
+    usage: "codetalk config\n  codetalk config set --api-url URL --api-key KEY [--model MODEL]\n  codetalk config show",
+    flags: [
+      { flag: "--api-url URL", desc: "LLM API endpoint" },
+      { flag: "--api-key KEY", desc: "LLM API key" },
+      { flag: "--model MODEL", desc: "LLM model name (default: gpt-4.1)" }
+    ],
+    note: "Run without arguments in a terminal to interactively edit config. Built-in providers: OpenAI, Anthropic, DeepSeek, OpenRouter, Manual."
+  },
+  scan: {
+    title: "codetalk scan — Run parallel LLM reviewers to produce architecture semantics",
+    usage: "codetalk scan [--json] [--depth low|medium|high|full] [--timeout MS]",
+    flags: [
+      { flag: "--json", desc: "Output scan report as JSON" },
+      { flag: "--depth LVL", desc: "Scan depth: low, medium, high, or full (default: medium)" },
+      { flag: "--timeout MS", desc: "API request timeout in milliseconds (default: 180000)" },
+      { flag: "--cwd PATH", desc: "Working directory" },
+      { flag: "--api-url URL", desc: "LLM API endpoint" },
+      { flag: "--api-key KEY", desc: "LLM API key" },
+      { flag: "--model MODEL", desc: "LLM model name" }
+    ]
+  },
+  map: {
+    title: "codetalk map — Generate a baseline semantic map from repo structure",
+    usage: "codetalk map [--map CODEMAP.md]",
+    flags: [{ flag: "--map PATH", desc: "Path to write the semantic map (default: CODEMAP.md)" }]
+  },
+  ask: {
+    title: "codetalk ask — Answer codebase questions using LLM",
+    usage: 'codetalk ask "your question" [--stream]',
+    flags: [
+      { flag: "--stream", desc: "Stream LLM response in real time" },
+      { flag: "--cwd PATH", desc: "Working directory" },
+      { flag: "--api-url URL", desc: "LLM API endpoint" },
+      { flag: "--api-key KEY", desc: "LLM API key" },
+      { flag: "--model MODEL", desc: "LLM model name" }
+    ]
+  },
+  plan: {
+    title: "codetalk plan — Generate an implementation plan using LLM",
+    usage: 'codetalk plan "change request" [--stream] [--out FILE]',
+    flags: [
+      { flag: "--stream", desc: "Stream LLM response in real time" },
+      { flag: "--out FILE", desc: "Plan output path (default: CODEPLAN.md)" },
+      { flag: "--cwd PATH", desc: "Working directory" },
+      { flag: "--api-url URL", desc: "LLM API endpoint" },
+      { flag: "--api-key KEY", desc: "LLM API key" },
+      { flag: "--model MODEL", desc: "LLM model name" }
+    ]
+  },
+  exec: {
+    title: "codetalk exec — Execute a CODEPLAN.md and apply all file changes",
+    usage: "codetalk exec [--plan FILE] [--parallel N] [--stream] [--timeout MS]",
+    flags: [
+      { flag: "--plan FILE", desc: "Plan file to execute (default: CODEPLAN.md)" },
+      { flag: "--parallel N", desc: "Number of parallel file editors (default: 4)" },
+      { flag: "--timeout MS", desc: "API request timeout in milliseconds (default: 180000)" },
+      { flag: "--stream", desc: "Stream LLM responses in real time" },
+      { flag: "--cwd PATH", desc: "Working directory" },
+      { flag: "--api-url URL", desc: "LLM API endpoint" },
+      { flag: "--api-key KEY", desc: "LLM API key" },
+      { flag: "--model MODEL", desc: "LLM model name" }
+    ],
+    note: "exec automatically syncs the semantic map after applying changes."
+  },
+  check: {
+    title: "codetalk check — Fail if the semantic map is missing or stale",
+    usage: "codetalk check [--map CODEMAP.md]",
+    flags: [{ flag: "--map PATH", desc: "Path to the semantic map (default: CODEMAP.md)" }]
+  },
+  version: {
+    title: "codetalk version — Print version and exit",
+    usage: "codetalk version",
+    flags: []
+  }
+};
+
 export function printHelp(): void {
-  console.log(`codetalk v${VERSION} - maintain a living semantic map for agentic code changes
+  const lines: string[] = [];
 
-Usage:
-  codetalk init [--map CODEMAP.md]
-  codetalk config
-  codetalk config set --api-url URL --api-key KEY [--model MODEL]
-  codetalk config show
-  codetalk scan [--json] [--depth low|medium|high|full] [--timeout MS]
-  codetalk map [--map CODEMAP.md]
-  codetalk ask "How does auth work?" [--stream]
-  codetalk plan "Add magic-link login" [--stream] [--out CODEPLAN.md]
-  codetalk exec [--plan CODEPLAN.md] [--parallel 4] [--stream] [--timeout MS]
-  codetalk check [--map CODEMAP.md]
-  codetalk rollback [--list | <backup-id>]
-  codetalk version
+  // Header
+  lines.push(`${BOLD}codetalk v${VERSION}${RESET} — maintain a living semantic map for agentic code changes`);
+  lines.push("");
 
-Also available as: codetalk-cli (aliased)
+  // Usage
+  lines.push(`${BOLD}Usage:${RESET}`);
+  lines.push(`  ${BOLD}codetalk${RESET} init [--map CODEMAP.md]`);
+  lines.push(`  ${BOLD}codetalk${RESET} config`);
+  lines.push(`  ${BOLD}codetalk${RESET} config set --api-url URL --api-key KEY [--model MODEL]`);
+  lines.push(`  ${BOLD}codetalk${RESET} config show`);
+  lines.push(`  ${BOLD}codetalk${RESET} scan [--json] [--depth low|medium|high|full] [--timeout MS]`);
+  lines.push(`  ${BOLD}codetalk${RESET} map [--map CODEMAP.md]`);
+  lines.push(`  ${BOLD}codetalk${RESET} ask "How does auth work?" [--stream]`);
+  lines.push(`  ${BOLD}codetalk${RESET} plan "Add magic-link login" [--stream] [--out CODEPLAN.md]`);
+  lines.push(`  ${BOLD}codetalk${RESET} exec [--plan CODEPLAN.md] [--parallel 4] [--stream] [--timeout MS]`);
+  lines.push(`  ${BOLD}codetalk${RESET} check [--map CODEMAP.md]`);
+  lines.push(`  ${BOLD}codetalk${RESET} rollback [--list | <backup-id>]`);
+  lines.push(`  ${BOLD}codetalk${RESET} version`);
+  lines.push("");
+  lines.push(`${DIM}Also available as: codetalk-cli (aliased)${RESET}`);
+  lines.push("");
+  lines.push(SEP);
+  lines.push("");
 
-Commands:
-  init     Create a semantic map template if one does not exist
-  config   Configure API URL, API key, and model
-  scan     Run parallel LLM reviewers to produce architecture semantics
-  map      Generate a baseline semantic map from the current repo shape
-  ask      Ask a codebase question using LLM
-  plan     Generate an implementation plan using LLM and write it to disk
-  exec     Execute a CODEPLAN.md: apply all file changes in parallel via LLM (auto-syncs map)
-  rollback Restore files from a previous exec backup
-  check    Fail if the semantic map is missing or older than source files
-  version  Print version and exit
+  // Commands
+  lines.push(`${BOLD}Commands:${RESET}`);
+  const cmds: Array<{ name: string; desc: string }> = [
+    { name: "init", desc: "Create a semantic map template if one does not exist" },
+    { name: "config", desc: "Configure API URL, API key, and model" },
+    { name: "scan", desc: "Run parallel LLM reviewers to produce architecture semantics" },
+    { name: "map", desc: "Generate a baseline semantic map from the current repo shape" },
+    { name: "ask", desc: "Ask a codebase question using LLM" },
+    { name: "plan", desc: "Generate an implementation plan using LLM and write it to disk" },
+    { name: "exec", desc: "Execute a CODEPLAN.md: apply all file changes in parallel via LLM" },
+    { name: "rollback", desc: "Restore files from a previous exec backup" },
+    { name: "check", desc: "Fail if the semantic map is missing or older than source files" },
+    { name: "version", desc: "Print version and exit" }
+  ];
+  const maxCmdLen = Math.max(...cmds.map((c) => c.name.length));
+  for (const cmd of cmds) {
+    const padded = cmd.name.padEnd(maxCmdLen + 2);
+    lines.push(`  ${BOLD}${padded}${RESET}${DIM}${cmd.desc}${RESET}`);
+  }
+  lines.push("");
+  lines.push(SEP);
+  lines.push("");
 
-User guide:
-  Need to start a repo        codetalk init
-  Need to configure API       codetalk config
-  Need repo understanding     codetalk scan
-  Need deeper repo scan      codetalk scan --depth high
-  Need a semantic map         codetalk map
-  Need to ask about code      codetalk ask "question"
-  Need a change plan          codetalk plan "request"
-  Need to execute a plan     codetalk exec
-  Need parallel execution    codetalk exec --parallel 8
-  Need CI freshness checks    codetalk check
-  Need version info           codetalk version
+  // User guide
+  lines.push(`${BOLD}User guide:${RESET}`);
+  const guides: Array<{ need: string; action: string }> = [
+    { need: "Need to start a repo", action: "codetalk init" },
+    { need: "Need to configure API", action: "codetalk config" },
+    { need: "Need repo understanding", action: "codetalk scan" },
+    { need: "Need deeper repo scan", action: "codetalk scan --depth high" },
+    { need: "Need a semantic map", action: "codetalk map" },
+    { need: "Need to ask about code", action: 'codetalk ask "question"' },
+    { need: "Need a change plan", action: 'codetalk plan "request"' },
+    { need: "Need to execute a plan", action: "codetalk exec" },
+    { need: "Need parallel execution", action: "codetalk exec --parallel 8" },
+    { need: "Need CI freshness checks", action: "codetalk check" },
+    { need: "Need version info", action: "codetalk version" }
+  ];
+  const maxNeedLen = Math.max(...guides.map((g) => g.need.length));
+  for (const g of guides) {
+    const padded = g.need.padEnd(maxNeedLen + 2);
+    lines.push(`  ${padded}${BOLD}${g.action}${RESET}`);
+  }
+  lines.push("");
+  lines.push(SEP);
+  lines.push("");
 
-Tip: Run any command with --help to see this guide.
+  // Tip
+  lines.push(`${BOLD}Tip:${RESET} ${DIM}Run any command with --help to see its flags and usage details.${RESET}`);
+  lines.push("");
+  lines.push(DIM + "The map is not just documentation. It is the shared semantic contract an" + RESET);
+  lines.push(DIM + "AI agent should read before editing and update after changing code." + RESET);
 
-The map is not just documentation. It is the shared semantic contract an
-AI agent should read before editing and update after changing code.`);
+  console.log(lines.join("\n"));
 }
