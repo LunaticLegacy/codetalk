@@ -18,6 +18,12 @@ export interface LlmMessage {
   toolName?: string;
   /** Set when role === "tool_result": whether the tool call failed. */
   isError?: boolean;
+  /**
+   * Set when role === "assistant": the tool calls the model made.
+   * Required by OpenAI: tool role messages must follow an assistant
+   * message whose tool_calls array includes the matching ids.
+   */
+  toolCalls?: LlmToolCall[];
 }
 
 // ── Tool definitions ──────────────────────────────────────────────────────────

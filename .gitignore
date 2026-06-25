@@ -6,4 +6,5 @@ dist/
 CODEPLAN_BACKUP.md
 .npmrc
 .codex
+.qwen
 .agents

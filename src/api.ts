@@ -187,7 +187,7 @@ export async function callWithTools(
     }
 
     // Add assistant message with tool calls to history
-    messages.push({ role: "assistant", content });
+    messages.push({ role: "assistant", content, toolCalls });
 
     // Execute each tool and add results
     for (const tc of toolCalls) {

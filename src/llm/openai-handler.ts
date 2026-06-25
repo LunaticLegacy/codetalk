@@ -164,6 +164,20 @@ export class OpenAIHandler extends LlmHandler {
           content: msg.content
         };
       }
+      if (msg.role === "assistant" && msg.toolCalls && msg.toolCalls.length > 0) {
+        return {
+          role: "assistant",
+          content: msg.content,
+          tool_calls: msg.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: "function",
+            function: {
+              name: tc.name,
+              arguments: JSON.stringify(tc.args)
+            }
+          }))
+        };
+      }
       return { role: msg.role, content: msg.content };
     });
   }

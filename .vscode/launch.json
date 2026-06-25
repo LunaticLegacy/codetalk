@@ -1,0 +1,37 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "preLaunchTask": "npm: build",
+      "env": {
+        "CODETALKER_CONFIG": "${workspaceFolder}/.vscode/test-config.json"
+      }
+    },
+    {
+      "name": "Run Extension (no build)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "env": {
+        "CODETALKER_CONFIG": "${workspaceFolder}/.vscode/test-config.json"
+      }
+    },
+    {
+      "name": "Attach to Extension Host",
+      "type": "extensionHost",
+      "request": "attach",
+      "port": 9229,
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"]
+    }
+  ]
+}
