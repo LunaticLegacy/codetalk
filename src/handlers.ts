@@ -36,7 +36,6 @@ import {
   ensureParentDirectory,
   fail,
   getChangedFiles,
-  hasGit,
   getExtension,
   maskSecret,
   normalizePath,
@@ -285,7 +284,9 @@ export async function execution(options: CliOptions): Promise<void> {
     panel.add(`editor ${i + 1}`, `Waiting: ${fileSpecs[i].filePath}`);
   }
 
-  const useDiff = hasGit();
+  // LLMs produce unreliable unified diffs (hallucinated line numbers, mismatched context).
+  // Always use full-content mode — slightly more tokens, never corrupt patches.
+  const useDiff = false;
   const totalFiles = fileSpecs.length;
   const tasks = fileSpecs.map((spec, index) => async () => {
     const agentId = `editor ${index + 1}`;
@@ -363,40 +364,12 @@ export async function execution(options: CliOptions): Promise<void> {
     const fileNum = (changedCount + 1) + "/" + results.length;
     const target = resolve(options.cwd, r.filePath);
 
-    if (r.action === "modified") {
-      panel.update("apply", "Applying diff to " + r.filePath + "...");
-      try {
-        // Check if the diff applies cleanly
-        execFileSync("git", ["apply", "--check", "-"], {
-          cwd: options.cwd, input: r.newContent,
-          stdio: ["pipe", "pipe", "pipe"], encoding: "utf8"
-        });
-        // Apply the diff
-        execFileSync("git", ["apply", "-"], {
-          cwd: options.cwd, input: r.newContent,
-          stdio: ["pipe", "pipe", "pipe"], encoding: "utf8"
-        });
-        changedCount++;
-        panel.update("apply", "✓ " + r.filePath);
-      } catch {
-        // Diff failed. Retry the editor asking for full content instead of a diff.
-        panel.update("apply", "git apply failed for " + r.filePath + ", retrying with full content...");
-        const retryPrompt = createExecEditorPrompt(r.filePath, "", r.originalContent, plan, currentMap, false);
-        const { content: fullContent } = await callChatCompletion(options, retryPrompt, panel, `editor-retry ${r.filePath}`, "Full content");
-        const cleanedFull = stripCodeFence(fullContent);
-        ensureParentDirectory(target);
-        writeFileSync(target, cleanedFull, "utf8");
-        changedCount++;
-        panel.update("apply", "✓ " + r.filePath + " (full content)");
-      }
-    } else {
-      // New file — write full content
-      panel.update("apply", "Creating " + r.filePath + "...");
-      ensureParentDirectory(target);
-      writeFileSync(target, r.newContent, "utf8");
-      changedCount++;
-      panel.update("apply", "✓ " + r.filePath);
-    }
+    // Always write full content — LLM-generated diffs are unreliable.
+    panel.update("apply", (r.action === "created" ? "Creating " : "Writing ") + r.filePath + "...");
+    ensureParentDirectory(target);
+    writeFileSync(target, r.newContent, "utf8");
+    changedCount++;
+    panel.update("apply", "✓ " + r.filePath);
   }
 
   // Phase 4: Gatekeeper agent — validate program logic, retry if needed
