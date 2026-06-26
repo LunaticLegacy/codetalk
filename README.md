@@ -143,7 +143,7 @@ Safety features:
 | `--api-key KEY` | LLM API key |
 | `--model MODEL` | LLM model name |
 | `--timeout MS` | API request timeout (default: 180000) |
-| `--parallel N` | Parallel editor agents for exec (default: 4) |
+| `--parallel N` | Number of parallel workers for semantic and exec (default: 4) |
 | `--help` | Show command-specific help |
 
 ### Commands
@@ -154,13 +154,14 @@ Safety features:
 | `config` | Interactive provider/API configuration menu |
 | `config set --api-url URL --api-key KEY [--model MODEL]` | Non-interactive config |
 | `config show` | Display masked config |
-| `scan [--depth low|medium|high|full] [--timeout MS]` | Analyze repository with AST extraction + LLM synthesis |
+| `scan [--timeout MS]` | Analyze repository with AST extraction + LLM synthesis |
+| `semantic [--parallel N\|MAX] [--timeout MS]` | Extract function/method semantics using parallel LLM workers |
 | `map` | Generate a baseline semantic map from repo structure |
 | `ask "question"` | Answer codebase questions using tools + LLM |
 | `plan "request" [--out FILE]` | Generate an implementation plan and write to disk |
 | `exec [--plan FILE] [--parallel N] [--timeout MS]` | Execute a plan: apply file changes, validate, sync map |
 | `check` | Fail if the map is missing or stale |
-| `rollback [--list | <id>]` | Restore files from a previous exec backup |
+| `rollback [--list \| <id>]` | Restore files from a previous exec backup |
 | `version` | Print version and exit |
 
 ### Token Usage

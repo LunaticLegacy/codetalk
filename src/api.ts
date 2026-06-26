@@ -32,7 +32,8 @@ export async function callChatCompletion(options: CliOptions, prompt: string, pa
         { role: "system", content: systemPrompt() },
         { role: "user", content: prompt }
       ],
-      temperature: 0.2
+      temperature: 0.2,
+      signal: options.signal
     });
 
     progress("Model response received.");
@@ -124,7 +125,8 @@ export async function callChatCompletionMessages(
     const response = await portal.chat({
       model: config.model,
       messages: messages as LlmMessage[],
-      temperature: 0.2
+      temperature: 0.2,
+      signal: options.signal
     });
 
     progress("Model response received.");
@@ -175,7 +177,8 @@ export async function callWithTools(
       model: config.model,
       messages,
       tools: toolDefs.length > 0 ? toolDefs : undefined,
-      temperature: 0.2
+      temperature: 0.2,
+      signal: options.signal
     });
 
     const content = response.content || "";
@@ -215,7 +218,8 @@ export async function callWithTools(
   const finalResponse = await portal.chat({
     model: config.model,
     messages: finalMessages,
-    temperature: 0.2
+    temperature: 0.2,
+    signal: options.signal
   });
 
   return finalResponse.content || "";

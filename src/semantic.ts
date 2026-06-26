@@ -98,29 +98,19 @@ export async function runSemanticMap(options: CliOptions): Promise<void> {
   let startedCount = 0;
   let finishedCount = 0;
   let spinnerIndex = 0;
-  const heartbeat = setInterval(() => {
-    if (finishedCount >= inventory.length) {
-      return;
-    }
 
-    const activeCount = Math.max(0, startedCount - finishedCount);
-    const spinner = SPINNER_FRAMES[spinnerIndex % SPINNER_FRAMES.length];
-    spinnerIndex += 1;
-    panel.update("semantic", `${spinner} ${finishedCount}/${inventory.length} analyzed, ${activeCount} active worker${activeCount === 1 ? "" : "s"}`);
-  }, 400);
-
-  for (let index = 0; index < inventory.length; index += 1) {
-    const context = buildSemanticTaskContext(inventory, index);
-    panel.add(`analysis ${index + 1}`, formatSemanticQueuedStatus(index + 1, inventory[index].qualifiedName, context));
-  }
   const tasks = inventory.map((item, index) => async () => {
     startedCount += 1;
     const activeCount = startedCount - finishedCount;
     const spinner = SPINNER_FRAMES[spinnerIndex % SPINNER_FRAMES.length];
+    spinnerIndex += 1;
     const context = buildSemanticTaskContext(inventory, index);
     const agentId = `analysis ${index + 1}`;
-    panel.update("semantic", `${spinner} ${finishedCount}/${inventory.length} analyzed, ${activeCount} active worker${activeCount === 1 ? "" : "s"}`);
-    panel.update(agentId, formatSemanticActiveStatus(index + 1, item.qualifiedName, context, startedCount, finishedCount, inventory.length));
+
+    panel.update("semantic", `${spinner} ${finishedCount}/${inventory.length} analyzed, ${activeCount} worker${activeCount === 1 ? "" : "s"}`);
+
+    // Add agent row only when it starts running (not for all N upfront)
+    panel.add(agentId, formatSemanticActiveStatus(index + 1, item.qualifiedName, context, startedCount, finishedCount, inventory.length));
 
     try {
       return await analyzeFunction(options, item, cache, index + 1, inventory.length, panel, context);
@@ -146,7 +136,6 @@ export async function runSemanticMap(options: CliOptions): Promise<void> {
     console.log(`Wrote semantic map: ${normalizePath(targetMap)}`);
     console.log(`Wrote semantic cache: ${normalizePath(cachePath)}`);
   } finally {
-    clearInterval(heartbeat);
     panel.finish();
   }
 }

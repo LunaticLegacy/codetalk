@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 
+import { MissionPanel } from "../panel.js";
 import {
   getDashboardState,
   runCodetalkCommand,
@@ -12,7 +13,8 @@ import { renderDashboardHtml } from "./webview.js";
 
 type DashboardMessage =
   | { type: "refresh" }
-  | { type: "run"; command: CodetalkCommand; message?: string; outPath?: string; planPath?: string; backupId?: string };
+  | { type: "cancel" }
+  | { type: "run"; command: CodetalkCommand; message?: string; outPath?: string; planPath?: string; backupId?: string; parallel?: string };
 
 /**
  * WebviewViewProvider that renders the codetalk dashboard in the VSCode sidebar.
@@ -21,6 +23,7 @@ type DashboardMessage =
  */
 export class CodetalkViewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
+  private currentAbortController: AbortController | null = null;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -59,7 +62,35 @@ export class CodetalkViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    if (message.type === "cancel") {
+      if (this.currentAbortController) {
+        this.currentAbortController.abort();
+        this.currentAbortController = null;
+      }
+      const event: CodetalkEvent = {
+        type: "status",
+        command: "scan",
+        status: "cancelled",
+        message: "Operation cancelled by user"
+      };
+      this.postEvent(event);
+      this.postState();
+      return;
+    }
+
+    // Create abort controller for this operation
+    this.currentAbortController = new AbortController();
+    const signal = this.currentAbortController.signal;
+
     const options = this.buildOptionsForMessage(message);
+    options.signal = signal;
+
+    // Wire up MissionPanel progress → webview
+    const previousProgress = MissionPanel.onProgress;
+    MissionPanel.onProgress = (agentId: string, status: string, done: boolean) => {
+      const event: CodetalkEvent = { type: "progress", agentId, message: status, done };
+      this.postEvent(event);
+    };
 
     try {
       await runCodetalkCommand(
@@ -74,15 +105,26 @@ export class CodetalkViewProvider implements vscode.WebviewViewProvider {
         }
       );
     } catch (error) {
-      const event: CodetalkEvent = {
-        type: "status",
-        command: message.command,
-        status: "failed",
-        message: error instanceof Error ? error.message : String(error)
-      };
-      this.postEvent(event);
-      vscode.window.showErrorMessage(event.message);
+      if (error instanceof Error && error.name === "AbortError") {
+        this.postEvent({
+          type: "status",
+          command: message.command,
+          status: "cancelled",
+          message: `${message.command} cancelled`
+        });
+      } else {
+        const event: CodetalkEvent = {
+          type: "status",
+          command: message.command,
+          status: "failed",
+          message: error instanceof Error ? error.message : String(error)
+        };
+        this.postEvent(event);
+        vscode.window.showErrorMessage(event.message);
+      }
     } finally {
+      MissionPanel.onProgress = previousProgress;
+      this.currentAbortController = null;
       this.postState();
     }
   }
@@ -126,6 +168,7 @@ export class CodetalkViewProvider implements vscode.WebviewViewProvider {
     const args = ["--cwd", getWorkspaceRoot()];
     if (message.outPath) args.push("--out", message.outPath);
     if (message.planPath) args.push("--plan", message.planPath);
+    if (message.parallel) { args.push("--parallel", message.parallel); }
     if (message.message) args.push(message.message);
     return parseOptions(args);
   }

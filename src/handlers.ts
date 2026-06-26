@@ -378,9 +378,16 @@ export async function execution(options: CliOptions): Promise<void> {
         });
         changedCount++;
         panel.update("apply", "✓ " + r.filePath);
-      } catch (applyError: unknown) {
-        const errMsg = applyError instanceof Error ? applyError.message : String(applyError);
-        fail("git apply failed for " + r.filePath + ": " + errMsg.slice(0, 500));
+      } catch {
+        // Diff failed. Retry the editor asking for full content instead of a diff.
+        panel.update("apply", "git apply failed for " + r.filePath + ", retrying with full content...");
+        const retryPrompt = createExecEditorPrompt(r.filePath, "", r.originalContent, plan, currentMap, false);
+        const { content: fullContent } = await callChatCompletion(options, retryPrompt, panel, `editor-retry ${r.filePath}`, "Full content");
+        const cleanedFull = stripCodeFence(fullContent);
+        ensureParentDirectory(target);
+        writeFileSync(target, cleanedFull, "utf8");
+        changedCount++;
+        panel.update("apply", "✓ " + r.filePath + " (full content)");
       }
     } else {
       // New file — write full content

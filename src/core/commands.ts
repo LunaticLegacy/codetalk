@@ -39,6 +39,7 @@ export type CodetalkCommand =
 
 export type CodetalkEvent =
   | { type: "status"; command: CodetalkCommand; status: "started" | "completed" | "failed" | "cancelled"; message: string }
+  | { type: "progress"; agentId: string; message: string; done: boolean }
   | { type: "log"; stream: "stdout" | "stderr"; message: string }
   | { type: "artifact"; name: string; data: unknown };
 

@@ -9,6 +9,12 @@ function formatElapsed(ms: number): string {
 const RENDER_DEBOUNCE_MS = 80;
 
 export class MissionPanel {
+  /**
+   * Optional callback that fires on every MissionPanel status change.
+   * The VSCode extension sets this to forward progress to the webview.
+   */
+  static onProgress: ((agentId: string, status: string, done: boolean) => void) | null = null;
+
   #agents: Array<{ id: string; status: string; done: boolean; printed: boolean; startedAt: number }> = [];
   #isTTY: boolean;
   #started: boolean = false;
@@ -21,6 +27,7 @@ export class MissionPanel {
 
   add(id: string, status: string = ""): void {
     this.#agents.push({ id, status, done: false, printed: false, startedAt: Date.now() });
+    MissionPanel.onProgress?.(id, status, false);
     this.#scheduleRender();
   }
 
@@ -28,6 +35,7 @@ export class MissionPanel {
     const agent = this.#agents.find((a) => a.id === id);
     if (agent && agent.status !== status) {
       agent.status = status;
+      MissionPanel.onProgress?.(id, status, false);
       this.#scheduleRender();
     }
   }
@@ -35,6 +43,7 @@ export class MissionPanel {
   done(id: string, status: string): void {
     const agent = this.#agents.find((a) => a.id === id);
     if (agent) {
+      MissionPanel.onProgress?.(id, status, true);
       const elapsed = Date.now() - agent.startedAt;
       const elapsedStr = formatElapsed(elapsed);
       // Prepend runtime before any [tokens...] suffix

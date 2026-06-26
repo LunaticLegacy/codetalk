@@ -13,6 +13,8 @@ export type CliOptions = {
   apiKey?: string;
   model?: string;
   message: string;
+  /** AbortSignal for cancelling in-flight API requests (VSCode extension). */
+  signal?: AbortSignal;
 };
 
 export type SemanticFunctionKind = "function" | "method";

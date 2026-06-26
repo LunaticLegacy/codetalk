@@ -1,373 +1,229 @@
-# Implementation Plan: Bridge to Claude Code-Level Capabilities
-
-## Goal
-
-Evolve codetalk from a command-driven CLI into a reasoning loop that can autonomously understand, explore, and modify codebases — matching the interaction model of tools like Claude Code.
+Now I have a complete picture. Here is the plan:
 
 ---
 
-## Phase 1 — Tool Use (`#5`) ⌛ 2–3 days
+### Goal
 
-**Problem:** LLM can't explore the codebase on its own. It only sees what codetalk pre-fetches for it.
-
-### 1.1 Add tool-calling infrastructure
-
-**New file:** `src/tools.ts`
-- `Tool` type: `{ name: string; description: string; handler: (args: any) => Promise<string> }`
-- `ToolRegistry`: register/lookup/execute tools by name
-- Expose tool list to LLM in system prompt
-
-### 1.2 Implement tools
-
-| Tool | Description | Implementation |
-|------|-------------|----------------|
-| `read(file, range?)` | Read file content (or line range) | `readFileSync` with slicing |
-| `grep(pattern)` | Search codebase for pattern | `execFileSync("rg", ...)` with fallback to manual `readdirSync` + `readFileSync` |
-| `ls(dir)` | List directory contents | `readdirSync` |
-| `glob(pattern)` | Find files matching glob | `execFileSync` with Node glob or `fast-glob` |
-| `stat(path)` | File metadata | `statSync` |
-| `git_log(n)` | Recent git history | `execFileSync("git", ["log", ...])` |
-
-### 1.3 Injection point
-
-- In `ask` and `plan`: after the system prompt, inject available tools list
-- LLM responds with tool calls in a structured format (JSON: `{"tool": "grep", "args": {"pattern": "def main"}}`)
-- codetalk executes the tool, returns result, LLM continues
-- Loop until LLM produces final answer (no more tool calls)
-
-### Files to modify
-- `src/api.ts` — system prompt in `callChatCompletion` to include tool definitions
-- `src/handlers.ts` — `askCodebase` / `planChange` to implement tool-calling loop
-- New: `src/tools.ts` — tool implementations
+Add a "Stop" button in the VS Code extension webview dashboard that lets the user cancel any running command at any time — functionally equivalent to pressing Ctrl+C in the CLI.
 
 ---
 
-## Phase 2 — Retrieval (`#3`) ⌛ 2–3 days
+### Affected Files
 
-**Problem:** Currently dumps all files into context (140K char limit). No targeted retrieval.
-
-### 2.1 Semantic file index
-
-- On `scan`, build a lightweight index: for each file, store:
-  - Path, size, language
-  - Exports list (function/class/variable names) — quick regex parse
-  - Import list (what this file imports)
-- Store in `.codetalk/index.json`
-
-### 2.2 Retrieval for `ask`
-
-Replace `buildRepositoryEvidence` (all files) with:
-
-1. User asks question
-2. **Step 1:** LLM determines which files are likely relevant (based on index)
-3. **Step 2:** Read only those files (full or truncated) and answer
-
-### 2.3 Retrieval for `plan`
-
-1. User describes change
-2. **Step 1:** LLM identifies affected files from index
-3. **Step 2:** Read those files + their direct dependencies (follow imports)
-4. **Step 3:** Generate plan only from this focused context
-
-### Files to modify
-- `src/handlers.ts` — `askCodebase`, `planChange` — retrieval loop
-- `src/utils.ts` — `buildRepositoryEvidence` → replace with retrieval-based logic
-- New: `.codetalk/index.json` cache (auto-generated during scan)
+| File | Change Type |
+|------|-------------|
+| `src/vscode/viewProvider.ts` | Modify — add `AbortController` field, wire stop/dispose cancellation |
+| `src/vscode/webview.ts` | Modify — add "Stop" button, handle "stop" message, update UI states |
+| `src/core/commands.ts` | Modify — detect `AbortError` in `runCodetalkCommand` catch block and emit `"cancelled"` instead of `"failed"` |
+| `src/vscode/extension.ts` | Modify — register `codetalk.stop` command for command palette (optional but nice) |
 
 ---
 
-## Phase 3 — Semantic Understanding (`#2`) ⌛ 3–4 days
+### Specific Code Changes
 
-**Problem:** CODEMAP.md is text, not structured data. No call graph, no dependency graph.
+#### 1. `src/core/commands.ts` — Detect AbortError in catch block
 
-### 3.1 Symbol indexer
+In `runCodetalkCommand`, inside the `catch` block (around line 98-102), after capturing the error message, check whether the error is an `AbortError` (via `(error as any)?.name === 'AbortError'`). If so, emit a "cancelled" status event (with `status: "cancelled"`) and set `ok: false` on the returned result — but **do not re-throw**. Instead, return a result with `artifact: { cancelled: true }`. This prevents the upstream caller from seeing an unhandled rejection.
 
-For `.py` files:
-- Parse with `ast` (via Python subprocess) to extract:
-  - Classes and their methods
-  - Functions and their signatures
-  - Decorators
-  - Import relationships
+The diff in logic:
 
-For `.ts/.js` files:
-- Quick regex-based extraction
-- Or integrate `typescript` compiler API for full AST
+```ts
+// Before (pseudo):
+catch (error) {
+  const msg = ...;
+  emit({ type: "status", command, status: "failed", message: msg });
+  throw error;
+}
 
-### 3.2 Call graph builder
-
-- From import analysis + function references, build a directed graph
-- Store as `.codetalk/callgraph.json`
-- Display in `scan` output: "top 5 most-depended-on modules"
-
-### 3.3 Integrate into CODEMAP.md
-
-- `scan` merger prompt now receives symbol index as additional context
-- CODEMAP.md sections become more precise (exact symbol lists per module)
-
-### Files to modify
-- `src/utils.ts` — `collectSourceFiles` extended with symbol extraction
-- `src/handlers.ts` — `runArchitectureScan` merger prompt gets symbol data
-- `src/types.ts` — new types for symbol graph
-
----
-
-## Phase 4 — Editing (`#6`) — Patch mode ⌛ 2–3 days
-
-**Problem:** `exec` rewrites entire files. Should produce surgical patches instead.
-
-### 4.1 Unified diff format
-
-- Editor agent returns a **unified diff** (`---/+++`) instead of full file content
-- codetalk applies the diff using `patch` (or a JS diff library)
-- If diff fails to apply (conflict), fall back to full file write
-
-### 4.2 Benefits
-
-- Smaller LLM output → faster, cheaper
-- Surgical changes instead of full file replacement
-- Supports partial file changes without re-reading the whole file
-- Conflicts are caught early (patch reject)
-
-### 4.3 Editor prompt update
-
-- Change instruction from "Return COMPLETE new file content" to "Return a unified diff"
-- Keep full-file fallback for new files and major rewrites (coordinator decides)
-
-### Files to modify
-- `src/handlers.ts` — `createExecEditorPrompt`, apply logic
-- `src/utils.ts` — add diff application helper
-
----
-
-## Phase 5 — Validation (`#7`) — Auto lint/test ⌛ 1–2 days
-
-**Problem:** Only Python `ast.parse` syntax check. No lint, no test run.
-
-### 5.1 Add tool-based validation
-
-After gatekeeper passes, before commit:
-
-```bash
-# Python
-python -m py_compile "$file"
-ruff check "$file"    # if available
-pytest               # if test dir exists
-
-# TypeScript  
-npx tsc --noEmit     # if tsconfig.json exists
+// After (pseudo):
+catch (error) {
+  const isAbort = (error as any)?.name === 'AbortError';
+  const status = isAbort ? "cancelled" : "failed";
+  const message = isAbort ? `${command} cancelled by user` : (error instanceof Error ? error.message : String(error));
+  emit({ type: "status", command, status, message });
+  if (isAbort) {
+    return { command, ok: false, stdout: capture.stdout(), stderr: capture.stderr(), artifact: { cancelled: true } };
+  }
+  throw error;
+}
 ```
 
-### 5.2 Failure handling
+#### 2. `src/vscode/viewProvider.ts` — Add AbortController lifecycle
 
-- If validation fails, gatekeeper receives error output as feedback
-- Same retry loop as current gatekeeper (max 2 attempts)
-- If still failing after retries, report to user with full error output
-
-### 5.3 Configurable validation
-
-- `.codetalk/config.json`: `"validation": { "python": "ruff check", "typescript": "tsc --noEmit" }`
-
-### Files to modify
-- `src/handlers.ts` — gatekeeper phase extended with tool-based validation
-
----
-
-## Phase 6 — Safety / Approval (`#9`) ⌛ 1–2 days
-
-**Problem:** No user confirmation before changes are written.
-
-### 6.1 Diff preview before write
-
-After editors finish but before backup/write:
-
-1. Generate unified diff for each file
-2. Display diff to user via `process.stdout`
-3. Prompt: `Apply these changes? [Y/n/d (show diff)]`
-4. `d` — show full diff
-5. `n` — skip file but don't rollback
-6. `q` — rollback all changes
-
-### 6.2 `--yes` flag
-
-- `codetalk exec --yes` — skip confirmation, auto-apply
-- Default: always ask (interactive safety)
-
-### Files to modify
-- `src/handlers.ts` — `execution` function, before Phase 3
-
----
-
-## Phase 7 — Loop (`#10`) — Reasoning loop ⌛ 3–5 days
-
-**Problem:** User must type separate commands for each step. No autonomous cycle.
-
-### 7.1 `codetalk think "goal"` command
-
-New top-level command that implements the full loop:
-
-```
-observe → think → act → verify → (loop)
+**New private field** (`#currentAbortController`):
+```ts
+#currentAbortController: AbortController | null = null;
 ```
 
-1. **Ingest:** Read CODEMAP.md + file index + git log
-2. **Think:** LLM decides what to do (grep, read files, plan)
-3. **Act:** Execute tool call (grep, read, edit)
-4. **Observe:** Collect tool output
-5. **Verify:** Check if goal is met
-6. **Loop or done:** If not met, go to 2; if met, summarize
+**In `resolveWebviewView`**: After setting `this.view = webviewView`, register an `onDidDispose` listener:
 
-### 7.2 Loop manager
+```ts
+webviewView.onDidDispose(() => {
+  this.#currentAbortController?.abort();
+  this.#currentAbortController = null;
+});
+```
 
-```typescript
-async function thinkLoop(options, goal) {
-  let context = buildInitialContext(options);
-  let maxSteps = 25;
-  
-  for (let step = 0; step < maxSteps; step++) {
-    // LLM decides next action
-    const action = await callChatCompletion(options, thinkPrompt(context, goal));
-    
-    if (action.type === "done") {
-      console.log(action.summary);
-      return;
-    }
-    
-    // Execute tool
-    const result = await executeTool(action.tool, action.args);
-    context.addStep(action, result);
+**In the `DashboardMessage` type**: Add a new message variant:
+```ts
+| { type: "stop" }
+```
+
+**In `handleMessage`**: Add a new branch at the top:
+```ts
+if (message.type === "stop") {
+  this.#currentAbortController?.abort();
+  return;
+}
+```
+
+**Before dispatching a command** (inside the `message.type === "run"` branch, before `runCodetalkCommand`):
+- Abort any previous controller: `this.#currentAbortController?.abort()`
+- Create a new one: `this.#currentAbortController = new AbortController()`
+- Pass the signal to the command options by setting `options.signal = this.#currentAbortController.signal`
+
+Specifically, in `buildOptionsForMessage`, add a parameter or modify the returned options to include the signal. The cleanest approach: pass the `AbortSignal` as a second argument to `buildOptionsForMessage`, which sets `options.signal` on the result.
+
+**In the `catch` block of the `try` in `handleMessage`**: After catching, detect abort errors and emit "cancelled" status instead of showing `showErrorMessage`. This avoids an error popup when the user intentionally cancels.
+
+```ts
+catch (error) {
+  const isAbort = (error as any)?.name === 'AbortError';
+  if (isAbort) {
+    this.postEvent({ type: "status", command: message.command, status: "cancelled", message: `${message.command} cancelled` });
+  } else {
+    // existing error handling...
   }
 }
 ```
 
-### 7.3 Tool access
-
-The `think` loop has access to ALL tools from Phase 1:
-- `read`, `grep`, `ls`, `glob`, `stat`, `git_log`
-- Plus `edit` (makes changes) and `run` (runs shell commands)
-
-### Files to modify
-- `src/handlers.ts` — add `thinkLoop` function
-- `src/index.ts` — add `think` command dispatch
-- `src/constants.ts` — add help text for `think`
-
----
-
-## Phase 8 — Repo Ingest (`#1`) — Full tree ⌛ 1 day
-
-**Problem:** Current `collectSourceFiles` only finds source files by extension.
-
-### 8.1 Full repo tree
-
-- Walk ALL files (not just source extensions)
-- Categorize: source, config, asset, doc, data, binary
-- Build `.codetalk/repotree.json` with full structure
-- Detect monorepo structure (multiple packages)
-
-### 8.2 `.gitignore` integration
-
-Already partially implemented. Extend to generate ingest manifest:
-
-```json
-{
-  "files": 245,
-  "source": 89,
-  "config": 12,
-  "total_bytes": 340000,
-  "languages": { "Python": 45, "TypeScript": 30, "JSON": 8 },
-  "tree": [ ... ]
+**In `finally`**: Reset the abort controller:
+```ts
+finally {
+  this.#currentAbortController = null;
+  MissionPanel.onProgress = previousProgress;
+  this.postState();
 }
 ```
 
-### Files to modify
-- `src/utils.ts` — `collectSourceFiles` extended
-- `src/types.ts` — new tree types
+#### 3. `src/vscode/webview.ts` — UI changes
+
+**Add a "Stop" button** in the Progress section of the HTML (inside the `<details open>` for Progress, near the status bar):
+
+```html
+<button class="btn danger" id="stopBtn" style="display:none; margin-bottom:4px" disabled>⏹ Stop</button>
+```
+
+Initially hidden and disabled. The button is positioned right above the status bar.
+
+**Styling additions** (inside the `<style>` block):
+- Style for the stop button to be prominent (already `.btn.danger` exists)
+
+**JavaScript changes inside the `<script>` block**:
+
+1. Get a reference to the stop button:
+   ```js
+   const stopBtn = $("stopBtn");
+   ```
+
+2. Add click handler:
+   ```js
+   stopBtn.addEventListener("click", () => {
+     vscode.postMessage({ type: "stop" });
+   });
+   ```
+
+3. Modify the `run` function to show and enable the stop button when a command starts, and hide/disable it when it finishes:
+
+   In `run(cmd, extra)`:
+   ```js
+   run(cmd, extra) {
+     if (running) return;
+     running = true;
+     setDisabled(true);
+     stopBtn.style.display = "inline-block";
+     stopBtn.disabled = false;
+     statusEl.textContent = cmd + " running";
+     // ... rest unchanged
+   }
+   ```
+
+4. In the event handler (the `window.addEventListener("message", ...)` handler), when a `"status"` event arrives with status `"completed"`, `"failed"`, or `"cancelled"`, hide the stop button:
+
+   Inside the `if (d.type === "status")` branch:
+   ```js
+   if (["completed", "failed", "cancelled"].includes(d.status)) {
+     running = false;
+     setDisabled(false);
+     stopBtn.style.display = "none";
+     // ... existing logic
+   }
+   ```
+
+5. Add a new check in the event handler for `"cancelled"` status to show a brief message:
+   ```js
+   if (d.status === "cancelled") {
+     appendEvent("CANCELLED: " + d.message, true); // true = failed style
+   }
+   ```
+
+6. Make `setDisabled` NOT affect the stop button, or exclude it explicitly:
+   ```js
+   function setDisabled(v) {
+     document.querySelectorAll("button:not(#refresh):not(#stopBtn)").forEach((b) => b.disabled = v);
+   }
+   ```
+
+#### 4. `src/vscode/extension.ts` — Optional command palette command
+
+Register a `codetalk.stopDashboardCommand` command that posts a "stop" message to the view provider. This is a convenience so users can also stop from the command palette. Implementation:
+
+```ts
+const stopCommand = vscode.commands.registerCommand("codetalk.stop", () => {
+  // Send stop message via the webview provider's view
+  // The provider needs to be exposed or we find it via the view
+});
+```
+
+However, since the view provider is not globally accessible, a simpler approach is to store the provider reference on module scope in `extension.ts`:
+
+```ts
+let activeProvider: CodetalkViewProvider | undefined;
+```
+
+Set it in `activate`:
+```ts
+const provider = new CodetalkViewProvider(context);
+activeProvider = provider;
+```
+
+And in the stop command handler, call `activeProvider?.abortCurrentCommand()` where
+`abortCurrentCommand` is a new public method on `CodetalkViewProvider` that aborts `#currentAbortController`.
+
+The `activate` function already has a pattern for registering commands; we add one more.
 
 ---
 
-## Phase 9 — Memory (`#8`) — User preferences ⌛ 1 day
-
-**Problem:** Codetalk doesn't remember user preferences between sessions.
-
-### 9.1 .codetalk/config.json extended
-
-Add to config:
-```json
-{
-  "provider": "deepseek",
-  "apiUrl": "https://api.deepseek.com",
-  "apiKey": "...",
-  "model": "deepseek-v4-flash",
-  "preferences": {
-    "always_yes": false,
-    "parallel": 6,
-    "timeout_ms": 300000,
-    "validation": {
-      "python": "ruff check --select=E9,F"
-    },
-    "ignore_patterns": ["tests/fixtures/*"]
-  }
-}
-```
-
-### 9.2 Read preferences in command dispatch
-
-- `exec` reads `always_yes` to skip approval
-- `scan` reads `parallel` default
-- `api.ts` reads `timeout_ms` from config (env var already supported)
-
-### Files to modify
-- `src/types.ts` — add preferences to `CodetalkerConfig`
-- `src/utils.ts` — `readConfig` / `tryReadConfig` extended
-- `src/handlers.ts` — use preferences in command handlers
-
----
-
-## Implementation Order (Recommended)
-
-```
-Week 1:  Phase 1 (Tool Use) + Phase 2 (Retrieval)
-         → Biggest daily impact: LLM can now explore code itself
-
-Week 2:  Phase 3 (Semantic Understanding) + Phase 8 (Repo Ingest)
-         → Foundation for better retrieval and reasoning
-
-Week 3:  Phase 4 (Patch Editing) + Phase 5 (Validation)
-         → Safer, more surgical code changes
-
-Week 4:  Phase 6 (Safety/Approval) + Phase 9 (Memory)
-         → Polish the UX
-
-Week 5:  Phase 7 (Reasoning Loop)
-         → Capstone: `codetalk think` ties everything together
-```
-
-## Risks
+### Risks
 
 | Risk | Mitigation |
 |------|------------|
-| Tool-calling LLM output is unreliable | Use structured JSON for tool calls; validate schema before execution; retry on parse failure |
-| Retrieval misses important files | Allow LLM to explicitly request more files; fall back to full scan |
-| Python AST parsing via subprocess is slow | Cache results; batch analysis; only re-parse changed files |
-| Patch conflicts break edit flow | Fall back to full-file rewrite on patch failure; warn user |
-| Reasoning loop costs too many tokens | Cap max steps (25); summarize context after N steps; prune history |
-| User doesn't want autonomous mode | Keep all existing commands working; `think` is opt-in |
+| **Partial file writes on `exec` cancellation** — If exec is in the middle of applying file changes and the user hits stop, some files may be modified and others not | The exec flow already uses `git apply` for modifications; if the HTTP request aborts, the editor agent call fails, and the file is not written. For new files, the write does not happen. After cancellation, the user can run `rollback` to restore from the backup created before exec. |
+| **Aborted LLM calls waste tokens** — If a request is in flight, aborting stops the HTTP request mid-stream; tokens already generated are charged | Acceptable; this is the same behavior as Ctrl+C in the CLI. |
+| **Abort error not detected as `AbortError`** — Different environments (Node.js vs VS Code extension host) may throw different error types for abort | Check `(error as any)?.name === 'AbortError'` which works across environments. The `fetch` API and `AbortController` are standard in VS Code's extension host; they produce a `DOMException` with name `'AbortError'`. |
+| **Race condition** — User clicks Stop right as the command finishes naturally | The abort on a completed promise is a no-op. `#currentAbortController` may be null if the command already finished. Both code paths check for null. |
+| **View dispose while command running** — User closes the sidebar while scan/ask is in progress | The `onDidDispose` listener aborts the controller. The catch block in `handleMessage` handles the abort gracefully without showing an error popup. |
 
-## Files to Create
+---
 
-| File | Content |
-|------|---------|
-| `src/tools.ts` | Tool types, ToolRegistry, tool implementations |
-| `.codetalk/repotree.json` | Full repository tree manifest (auto-generated) |
-| `.codetalk/index.json` | Symbol index (auto-generated) |
-| `.codetalk/callgraph.json` | Call graph (auto-generated) |
+### Implementation Order
 
-## Files to Modify
+1. **`src/core/commands.ts`** — Modify `runCodetalkCommand` catch block to detect abort errors (return cancellation result). This is the foundation — the cancellation signal propagates from LLM layers upward, and this change ensures it's caught and reported correctly.
 
-| File | Changes |
-|------|---------|
-| `src/api.ts` | System prompt includes tool definitions; tool-calling loop |
-| `src/handlers.ts` | `askCodebase`/`planChange` retrieval; `execution` diff/patch; `thinkLoop` |
-| `src/utils.ts` | `collectSourceFiles` → full tree; `buildRepositoryEvidence` → retrieval |
-| `src/types.ts` | New types: `Tool`, `SymbolGraph`, `CallGraph`, `RepoTree`, `Preferences` |
-| `src/constants.ts` | Help text for `think` command |
-| `src/index.ts` | `think` command dispatch |
+2. **`src/vscode/viewProvider.ts`** — Add `#currentAbortController` field, wire `onDidDispose`, add `"stop"` message handler, pass signal in `buildOptionsForMessage`, handle abort errors in catch block. This is the core orchestration change.
+
+3. **`src/vscode/webview.ts`** — Add Stop button, show/hide logic, click handler, updated `setDisabled` exclusion. This is the user-facing UI change.
+
+4. **`src/vscode/extension.ts`** — (Optional) Register `codetalk.stop` command; expose provider reference for programmatic cancellation. Done last since it depends on the provider changes in step 2.
+
+Steps 1-3 can be done independently and tested together. Step 4 is optional polish.

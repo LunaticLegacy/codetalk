@@ -191,6 +191,44 @@ export function renderDashboardHtml(state: DashboardState, cspSource: string, no
     }
     .input-row input { flex: 1; min-width: 0; }
 
+    /* ── Progress agents ── */
+    .agents {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-bottom: 6px;
+    }
+    .agent-row {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      font-size: 10px;
+      padding: 1px 0;
+      line-height: 1.4;
+    }
+    .agent-row .mark {
+      flex-shrink: 0;
+      width: 12px;
+      text-align: center;
+      font-weight: bold;
+    }
+    .agent-row .mark.done { color: #2ea043; }
+    .agent-row .mark.active { color: var(--accent); }
+    .agent-row .aid {
+      flex-shrink: 0;
+      color: var(--muted);
+      min-width: 28px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .agent-row .msg {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     /* ── Status / timeline ── */
     .status-bar {
       font-size: 11px;
@@ -267,6 +305,10 @@ export function renderDashboardHtml(state: DashboardState, cspSource: string, no
         <button class="btn" data-command="scan">Scan</button>
         <button class="btn" data-command="semantic">Semantic</button>
         <button class="btn secondary" data-command="version">Version</button>
+        <div class="full input-row" style="margin-top:2px">
+          <span style="font-size:10px;color:var(--muted)">Parallel:</span>
+          <input id="parallelInput" value="4" aria-label="Parallel workers" style="width:48px;flex:none;text-align:center">
+        </div>
       </div>
     </details>
 
@@ -310,9 +352,14 @@ export function renderDashboardHtml(state: DashboardState, cspSource: string, no
     <details open>
       <summary>Progress</summary>
       <div class="section-body">
-        <div id="status" class="status-bar">Idle</div>
+        <div class="input-row" style="margin-bottom:4px">
+          <div id="status" class="status-bar" style="flex:1">Idle</div>
+          <button id="cancelBtn" class="btn danger" style="display:none;font-size:10px;padding:2px 8px">Cancel</button>
+        </div>
+        <div id="agents" class="agents"></div>
         <div id="timeline" class="timeline"></div>
         <pre id="output" class="output" style="margin-top:4px"></pre>
+        <div id="result" class="output" style="margin-top:6px;display:none"></div>
       </div>
     </details>
   </div>
@@ -322,14 +369,18 @@ export function renderDashboardHtml(state: DashboardState, cspSource: string, no
       const vscode = acquireVsCodeApi();
       let state = ${serializedState};
       let running = false;
+      const agents = new Map(); // agentId -> DOM element
 
       const $ = (id) => document.getElementById(id);
       const repoState = $("repoState");
       const configState = $("configState");
       const backupSelect = $("backupSelect");
       const statusEl = $("status");
+      const cancelBtn = $("cancelBtn");
+      const agentsEl = $("agents");
       const timeline = $("timeline");
       const output = $("output");
+      const resultEl = $("result");
 
       function render() {
         $("workspace").textContent = state.cwd.replace(/^.*\\//, "") || "codetalk";
@@ -378,11 +429,44 @@ export function renderDashboardHtml(state: DashboardState, cspSource: string, no
         setDisabled(true);
         statusEl.textContent = cmd + " running";
         output.textContent = "";
-        vscode.postMessage(Object.assign({ type: "run", command: cmd }, extra || {}));
+        resultEl.style.display = "none";
+        cancelBtn.style.display = "";
+        clearAgents();
+        const parallel = $("parallelInput").value.trim();
+        const payload = Object.assign({ type: "run", command: cmd }, extra || {});
+        if (parallel && !isNaN(Number(parallel)) && Number(parallel) > 0) {
+          payload.parallel = parallel;
+        }
+        vscode.postMessage(payload);
       }
 
       function setDisabled(v) {
-        document.querySelectorAll("button:not(#refresh)").forEach((b) => b.disabled = v);
+        document.querySelectorAll("button:not(#refresh):not(#cancelBtn)").forEach((b) => b.disabled = v);
+      }
+
+      function updateAgent(id, message, done) {
+        let row = agents.get(id);
+        if (!row) {
+          row = document.createElement("div");
+          row.className = "agent-row";
+          row.innerHTML = '<span class="mark active">\u25cf</span><span class="aid">' + esc(id.slice(0,14)) + '</span><span class="msg"></span>';
+          agentsEl.appendChild(row);
+          agents.set(id, row);
+        }
+        row.querySelector(".mark").className = "mark " + (done ? "done" : "active");
+        row.querySelector(".mark").textContent = done ? "\u2713" : "\u25cf";
+        row.querySelector(".msg").textContent = message;
+      }
+
+      function clearAgents() {
+        agentsEl.innerHTML = "";
+        agents.clear();
+      }
+
+      function showResult(text) {
+        if (!text) return;
+        resultEl.textContent = text;
+        resultEl.style.display = "block";
       }
 
       function esc(s) {
@@ -391,6 +475,11 @@ export function renderDashboardHtml(state: DashboardState, cspSource: string, no
         });
       }
 
+      cancelBtn.addEventListener("click", function () {
+        vscode.postMessage({ type: "cancel" });
+        cancelBtn.style.display = "none";
+        statusEl.textContent = "Cancelling\u2026";
+      });
       $("refresh").addEventListener("click", function () { vscode.postMessage({ type: "refresh" }); });
       document.querySelectorAll("[data-command]").forEach(function (b) {
         b.addEventListener("click", function () { run(b.dataset.command); });
@@ -421,7 +510,14 @@ export function renderDashboardHtml(state: DashboardState, cspSource: string, no
             if (["completed", "failed", "cancelled"].includes(d.status)) {
               running = false;
               setDisabled(false);
+              cancelBtn.style.display = "none";
+              // show output as result when ask completes
+              if (d.status === "completed" && d.command === "ask") {
+                showResult(output.textContent.trim());
+              }
             }
+          } else if (d.type === "progress") {
+            updateAgent(d.agentId, d.message, d.done);
           } else if (d.type === "log") {
             output.textContent += d.message;
           }

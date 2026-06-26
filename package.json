@@ -2,7 +2,7 @@
   "name": "codetalk-cli",
   "displayName": "codetalk",
   "publisher": "codetalk",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Maintain a living semantic map that agents use to understand and safely modify code.",
   "icon": "assets/logo.svg",
   "type": "module",
@@ -38,14 +38,46 @@
       ]
     },
     "commands": [
-      { "command": "codetalk.openDashboard", "title": "Open Dashboard", "category": "codetalk" },
-      { "command": "codetalk.scan", "title": "Scan Repository", "category": "codetalk" },
-      { "command": "codetalk.semantic", "title": "Extract Semantic Map", "category": "codetalk" },
-      { "command": "codetalk.ask", "title": "Ask Codebase", "category": "codetalk" },
-      { "command": "codetalk.plan", "title": "Plan Change", "category": "codetalk" },
-      { "command": "codetalk.exec", "title": "Execute Plan", "category": "codetalk" },
-      { "command": "codetalk.rollback", "title": "Rollback Backup", "category": "codetalk" },
-      { "command": "codetalk.check", "title": "Check Semantic Map", "category": "codetalk" }
+      {
+        "command": "codetalk.openDashboard",
+        "title": "Open Dashboard",
+        "category": "codetalk"
+      },
+      {
+        "command": "codetalk.scan",
+        "title": "Scan Repository",
+        "category": "codetalk"
+      },
+      {
+        "command": "codetalk.semantic",
+        "title": "Extract Semantic Map",
+        "category": "codetalk"
+      },
+      {
+        "command": "codetalk.ask",
+        "title": "Ask Codebase",
+        "category": "codetalk"
+      },
+      {
+        "command": "codetalk.plan",
+        "title": "Plan Change",
+        "category": "codetalk"
+      },
+      {
+        "command": "codetalk.exec",
+        "title": "Execute Plan",
+        "category": "codetalk"
+      },
+      {
+        "command": "codetalk.rollback",
+        "title": "Rollback Backup",
+        "category": "codetalk"
+      },
+      {
+        "command": "codetalk.check",
+        "title": "Check Semantic Map",
+        "category": "codetalk"
+      }
     ]
   },
   "bin": {
