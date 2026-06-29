@@ -1,10 +1,25 @@
+# npm module
 node_modules/
 npm-debug.log*
 .DS_Store
+
+# distribution
 dist/
 .codetalk/
+*.vsix
+
+# codepl;an
 CODEPLAN_BACKUP.md
+
+# secret
 .npmrc
 .codex
 .qwen
 .agents
+
+# dev environment
+.vscode
+agents
+assets
+scripts
+

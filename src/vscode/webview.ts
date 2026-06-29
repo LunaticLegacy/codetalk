@@ -214,6 +214,7 @@ export function renderDashboardHtml(state: DashboardState, cspSource: string, no
     }
     .agent-row .mark.done { color: #2ea043; }
     .agent-row .mark.active { color: var(--accent); }
+    .agent-row .mark.cancelled { color: var(--danger); }
     .agent-row .aid {
       flex-shrink: 0;
       color: var(--muted);
@@ -511,6 +512,13 @@ export function renderDashboardHtml(state: DashboardState, cspSource: string, no
               running = false;
               setDisabled(false);
               cancelBtn.style.display = "none";
+              // On cancel, mark all active agents as cancelled (✗ not ✓)
+              if (d.status === "cancelled") {
+                document.querySelectorAll(".mark.active").forEach(function(el) {
+                  el.className = "mark cancelled";
+                  el.textContent = "\u2717";
+                });
+              }
               // show output as result when ask completes
               if (d.status === "completed" && d.command === "ask") {
                 showResult(output.textContent.trim());
