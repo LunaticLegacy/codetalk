@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 import { callChatCompletionMessages } from "./api.js";
 import { LspPool } from "./lsp/pool.js";
-import { buildMap, collectSourceFiles, ensureParentDirectory, fail, getExtension, normalizePath, replaceSection, runLimited } from "./utils.js";
+import { buildMap, collectSourceFiles, ensureParentDirectory, fail, getExtension, normalizePath, replaceSection } from "./utils.js";
 import { buildSymbolIndex, saveIndex } from "./indexer.js";
 import { MissionPanel } from "./panel.js";
 import { semanticExtractionPrompt, semanticExtractionSystemPrompt } from "./prompts.js";
@@ -54,6 +54,86 @@ type SemanticTaskContext = {
   nextThree: string[];
 };
 
+/**
+ * Runs a set of parallel workers over an inventory, creating closures on demand
+ * so that only `parallel` closures exist at any time.
+ */
+async function runSemanticTasks<T>(
+  inventory: SemanticInventoryItem[],
+  worker: (item: SemanticInventoryItem, index: number) => Promise<T>,
+  parallel: number,
+  maxRetries: number = 0
+): Promise<T[]> {
+  const results: T[] = new Array(inventory.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(parallel, inventory.length);
+
+  async function workerFn(): Promise<void> {
+    while (nextIndex < inventory.length) {
+      const current = nextIndex++;
+      const item = inventory[current];
+      let lastError: unknown;
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (attempt > 0) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+          await new Promise((r) => setTimeout(r, delay));
+        }
+
+        try {
+          results[current] = await worker(item, current);
+          lastError = undefined;
+          break;
+        } catch (err) {
+          lastError = err;
+          if (attempt < maxRetries) {
+            process.stderr.write(`[semantic] Retry ${attempt + 1}/${maxRetries} for ${item.qualifiedName}: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
+        }
+      }
+
+      if (lastError) {
+        process.stderr.write(`[semantic] Failed after ${maxRetries + 1} attempts: ${item.qualifiedName} — ${lastError instanceof Error ? lastError.message : String(lastError)}\n`);
+        // Push a fallback entry so the whole run doesn't abort
+        results[current] = buildFallbackResult(item);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => workerFn()));
+  return results;
+}
+
+function buildFallbackResult(item: SemanticInventoryItem): AnalysisResult {
+  const now = new Date().toISOString();
+  return {
+    key: makeSemanticKey(item.filePath, item.qualifiedName, item.kind),
+    fingerprint: item.fingerprint,
+    filePath: item.filePath,
+    language: item.language,
+    kind: item.kind,
+    name: item.name,
+    qualifiedName: item.qualifiedName,
+    owner: item.owner,
+    sourceRange: item.sourceRange,
+    classContext: item.classContext,
+    siblingMembers: item.siblingMembers,
+    semantic: {
+      purpose: `[FAILED] ${item.qualifiedName}`,
+      inputs: [],
+      outputs: [],
+      sideEffects: [],
+      failureModes: ["Semantic extraction failed (timeout or API error after retries)"],
+      calls: [],
+      calledBy: [],
+      ownershipContext: item.owner ?? "",
+      inheritanceContext: item.classContext ?? "",
+      notes: ["Semantic extraction did not complete. Manual review recommended."]
+    },
+    updatedAt: now
+  };
+}
+
 export async function runSemanticMap(options: CliOptions): Promise<void> {
   const targetMap = resolve(options.cwd, options.mapPath);
   const cachePath = resolve(options.cwd, SEMANTIC_CACHE_DIR, SEMANTIC_CACHE_FILE);
@@ -99,7 +179,7 @@ export async function runSemanticMap(options: CliOptions): Promise<void> {
   let finishedCount = 0;
   let spinnerIndex = 0;
 
-  const tasks = inventory.map((item, index) => async () => {
+  const worker = async (item: SemanticInventoryItem, index: number): Promise<AnalysisResult> => {
     startedCount += 1;
     const activeCount = startedCount - finishedCount;
     const spinner = SPINNER_FRAMES[spinnerIndex % SPINNER_FRAMES.length];
@@ -117,11 +197,13 @@ export async function runSemanticMap(options: CliOptions): Promise<void> {
     } finally {
       finishedCount += 1;
     }
-  });
+  };
+
+  const maxRetries = options.maxRetries ?? 0;
 
   const workerCount = resolveSemanticParallel(options.parallelMode, options.parallel, inventory.length);
   try {
-    const analyses = await runLimited(tasks, workerCount);
+    const analyses = await runSemanticTasks(inventory, worker, workerCount, maxRetries);
     const nextCache = mergeSemanticCache(cache, analyses);
     const semanticSection = renderSemanticSection(analyses);
 

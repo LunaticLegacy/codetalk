@@ -9,6 +9,7 @@ export type CliOptions = {
   parallel: number;
   parallelMode: "fixed" | "max";
   timeout?: number;
+  maxRetries?: number;
   apiUrl?: string;
   apiKey?: string;
   model?: string;

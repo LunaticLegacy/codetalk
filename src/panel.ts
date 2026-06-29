@@ -7,6 +7,7 @@ function formatElapsed(ms: number): string {
 }
 
 const RENDER_DEBOUNCE_MS = 80;
+const NONTTY_FLUSH_INTERVAL_MS = 1000;
 
 export class MissionPanel {
   /**
@@ -20,6 +21,8 @@ export class MissionPanel {
   #started: boolean = false;
   #dirty: boolean = false;
   #renderTimer: ReturnType<typeof setTimeout> | null = null;
+  #nonTtyBatchTimer: ReturnType<typeof setTimeout> | null = null;
+  #nonTtyBatchBuffer: Array<{ id: string; status: string }> = [];
 
   constructor() {
     this.#isTTY = process.stderr.isTTY === true;
@@ -70,6 +73,14 @@ export class MissionPanel {
       clearTimeout(this.#renderTimer);
       this.#renderTimer = null;
     }
+    // Flush non-TTY batch
+    if (this.#nonTtyBatchTimer) {
+      clearTimeout(this.#nonTtyBatchTimer);
+      this.#nonTtyBatchTimer = null;
+    }
+    if (this.#nonTtyBatchBuffer.length > 0) {
+      this.#flushNonTtyBatch();
+    }
     if (this.#dirty) {
       this.#flushRender();
     }
@@ -107,13 +118,52 @@ export class MissionPanel {
         process.stderr.write(`\r\x1b[K${mark} ${agent.id}: ${agent.status}\n`);
       }
     } else {
-      // Non-TTY: only print newly-done agents to avoid spamming
+      // Non-TTY: batch done agents and flush at most once per second
+      const batch: Array<{ id: string; status: string }> = [];
       for (const agent of this.#agents) {
         if (agent.done && !agent.printed) {
           agent.printed = true;
-          process.stderr.write(`[${agent.id}] ${agent.status}\n`);
+          batch.push({ id: agent.id, status: agent.status });
         }
       }
+
+      if (batch.length > 0) {
+        if (this.#nonTtyBatchTimer) {
+          this.#nonTtyBatchBuffer.push(...batch);
+        } else {
+          this.#nonTtyBatchBuffer = batch;
+          this.#nonTtyBatchTimer = setTimeout(() => {
+            this.#nonTtyBatchTimer = null;
+            this.#flushNonTtyBatch();
+          }, NONTTY_FLUSH_INTERVAL_MS);
+        }
+      }
+    }
+  }
+
+  /** Flush accumulated non-TTY batch as compact lines. */
+  #flushNonTtyBatch(): void {
+    const batch = this.#nonTtyBatchBuffer;
+    this.#nonTtyBatchBuffer = [];
+    if (batch.length <= 1) {
+      for (const entry of batch) {
+        process.stderr.write(`[${entry.id}] ${entry.status}\n`);
+      }
+    } else if (batch.length <= 3) {
+      for (const entry of batch) {
+        const short = entry.id.length > 18 ? entry.id.slice(0, 16) + ".." : entry.id;
+        process.stderr.write(`  ${short}: ${entry.status}\n`);
+      }
+    } else {
+      const total = this.#agents.length;
+      const doneCount = this.#agents.filter((a) => a.done).length;
+      process.stderr.write(`[done] ${doneCount}/${total} — ${batch.length} completed`);
+      const first = batch[0].id;
+      const last = batch[batch.length - 1].id;
+      if (first !== last) {
+        process.stderr.write(` (${first} … ${last})`);
+      }
+      process.stderr.write("\n");
     }
   }
 }

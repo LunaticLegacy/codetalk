@@ -4,7 +4,7 @@
   "publisher": "codetalk",
   "version": "0.1.4",
   "description": "Maintain a living semantic map that agents use to understand and safely modify code.",
-  "icon": "assets/logo.svg",
+  "icon": "assets/logo.png",
   "type": "module",
   "main": "./dist/vscode/extension.js",
   "activationEvents": [
@@ -24,7 +24,7 @@
         {
           "id": "codetalk",
           "title": "codetalk",
-          "icon": "assets/logo.svg"
+          "icon": "assets/logo.png"
         }
       ]
     },
@@ -122,5 +122,9 @@
   },
   "dependencies": {
     "ts-morph": "^28.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LunaticLegacy/codetalk-cli.git"
   }
 }

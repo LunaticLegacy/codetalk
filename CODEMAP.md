@@ -27,10 +27,10 @@ Read it before modifying code. Update it after changing behavior.
 - **AST extractors** (`src/ast/`): extract symbols from TypeScript, Python, C++, and assembly files.
 - **Indexer** (`src/indexer.ts`): builds in‑memory symbol indices from source trees, used by `search` and `grep` tools. Now also uses LSP pool.
 - **LSP client** (`src/lsp/`): JSON‑RPC LSP client per language server; `LspPool` coordinates extraction across files/extensions.
-- **Semantic analyzer** (`src/semantic.ts`): extracts detailed function/method semantics (purpose, inputs, outputs, side effects, failure modes) for the `semantic` command.
+- **Semantic analyzer** (`src/semantic.ts`): extracts detailed function/method semantics (purpose, inputs, outputs, side effects, failure modes) for the `semantic` command. Now includes parallel task runners (`runSemanticTasks`, `resolveSemanticParallel`) and progress formatting utilities.
 - **Prompt templates** (`src/prompts.ts`): system prompts, tool definitions, and prompts for ask, plan, semantic extraction, reviewer agents, etc.
 - **Config** (`src/utils.ts`): read/write JSON config file (`~/.codetalker/config.json`), manage API URL, key, model; also `src/tui/config.ts` for interactive TUI configuration.
-- **Semantic map generator** (`src/utils.ts`): produces `CODEMAP.md` from repository structure (`buildMap`, `buildTemplate`, `buildChangeSync`, `buildRepositoryEvidence`).
+- **Semantic map generator** (`src/utils.ts`): produces `CODEMAP.md` from repository structure (`buildMap`, `buildTemplate`, `buildChangeSync`, `buildRepositoryEvidence`), scans config, package info, CI, semantic maps, module roles.
 - **VS Code extension** (`src/vscode/extension.ts`, `src/vscode/viewProvider.ts`, `src/vscode/webview.ts`): dashboard UI for viewing map status, running commands, and receiving events.
 - **Build scripts** (`scripts/build.mjs`, `scripts/test-cli.mjs`, `scripts/test-rollback.mjs`): build and test automation.
 - **Reference documents** (`references/repo-semantic-map.md`, `references/semantic-map-template.md`): canonical semantic map and reusable template.
@@ -81,9 +81,9 @@ No public npm package API; all functionality is CLI‑driven or VS Code extensio
 | `src/llm/anthropic-handler.ts` | `AnthropicHandler` class: implements `LlmHandler` for Anthropic API. Handles message content blocks, tool use, streaming events. | `./types.js`, `./base-handler.js` |
 | `src/llm/registry.ts` | Resolves provider ID from URL (`resolveProviderId`), maps provider to handler class (`createHandler`). | `./types.js`, `./openai-handler.js`, `./anthropic-handler.js` |
 | `src/llm/types.ts` | Core LLM types: `LlmHandlerConfig`, `LlmMessage`, `LlmRequest`, `LlmResponse`, `LlmToolCall`, `LlmToolDef`, `LlmStreamEvent`. | All LLM modules |
-| `src/semantic.ts` | Semantic analysis engine: `runSemanticMap`, `analyzeFunction`, `buildSemanticInventory`, `loadSemanticCache`, `saveSemanticCache`, `renderSemanticSection`, `mergeSemanticCache`. Used by `semantic` command and its running heartbeat / verbose per-agent task lines. | `./llm/index.js`, `./prompts.js`, `./panel.js`, `./utils.js`, `./indexer.js`, `./lsp/pool.js` |
+| `src/semantic.ts` | Semantic analysis engine: `runSemanticMap`, `analyzeFunction`, `buildSemanticInventory`, `loadSemanticCache`, `saveSemanticCache`, `renderSemanticSection`, `mergeSemanticCache`, `runSemanticTasks`, `resolveSemanticParallel`, `collectLspInventory`, `normalizeSemanticRecord`, `fallbackSemanticRecord`, `parseSemanticJson`, `buildSemanticTaskContext`, and associated formatting helpers. Used by `semantic` command and its running heartbeat / verbose per-agent task lines. | `./llm/index.js`, `./prompts.js`, `./panel.js`, `./utils.js`, `./indexer.js`, `./lsp/pool.js`, `./api.js` (legacy) |
 | `src/api.ts` | Legacy LLM client: `callChatCompletion`, `streamChatCompletion`, `callWithTools`, `runPrompt`, `runPromptCapture`. Still functional but superseded by `LlmPortal`. Some handlers still call these. | `./panel.js`, `./utils.js`, `./tools/index.js`, `./prompts.js` |
-| `src/utils.ts` | Swiss‑army‑knife: `collectSourceFiles`, `buildMap`, `buildTemplate`, `buildChangeSync`, `buildScanReport`, `buildRepositoryEvidence`, `readConfig`, `writeConfig`, `configPath`, `normalizePath`, `getChangedFiles`, `hasGit`, `fail`, `ensureParentDirectory`, `replaceSection`, `splitFilesForAgents`, `runLimited`, `maskSecret`, `parseOptions`, `scanPackageInfo`, `scanSemanticMaps`, `scanCi`, `scanConfigState`, `inferModuleRoles`, `unique`, `createGitignoreMatcher`, `isGitignored`, `loadGitignore`, `streamProgress`, `taskProgress`, `streamLabeledProgress`. | `./constants.js`, `./indexer.js` |
+| `src/utils.ts` | Swiss‑army‑knife: `collectSourceFiles`, `summarize`, `buildMap`, `buildTemplate`, `buildChangeSync`, `buildScanReport`, `buildRepositoryEvidence`, `formatScan`, `readConfig`, `tryReadConfig`, `writeConfig`, `configPath`, `normalizePath`, `getChangedFiles`, `hasGit`, `fail`, `ensureParentDirectory`, `replaceSection`, `splitFilesForAgents`, `runLimited`, `maskSecret`, `parseOptions`, `scanPackageInfo`, `scanSemanticMaps`, `scanCi`, `scanConfigState`, `inferModuleRoles`, `inferSourceRole`, `unique`, `createGitignoreMatcher`, `isGitignored`, `loadGitignore`, `streamProgress`, `taskProgress`, `streamLabeledProgress`, `normalizeParallel`. | `./constants.js`, `./indexer.js` |
 | `src/panel.ts` | `MissionPanel` class: CLI progress display (spinner, status lines, debounced redraw). Also used by VS Code extension for progress callbacks (`onProgress`). | None |
 | `src/tui/config.ts` | Interactive configuration TUI: `configureTui`, `selectProvider`, `selectModel`, `selectConfigAction`, `fetchProviderModels`, `promptConfigValue`, `promptModelFallback`, `waitForEnter`. | `./constants.js`, `./utils.js` |
 | `src/indexer.ts` | Symbol index: `buildSymbolIndex`, `searchIndex`, `saveIndex`, `loadIndex`. Uses LSP pool and AST extractors. | `./ast/index.js`, `./lsp/pool.js`, `./utils.js` |
@@ -277,7 +277,7 @@ No public npm package API; all functionality is CLI‑driven or VS Code extensio
 | `ScanDepth` | `"low" \| "medium" \| "high" \| "full"` | Determines analysis intensity. |
 | `CliOptions` | `depth?: ScanDepth`, `timeout?: number`, `stream?: boolean`, `parallel?: number`, `parallelMode?: "fixed" \| "max"`, `out?: string`, `plan?: string`, `list?: boolean`, `write?: boolean`, `mapPath?: string`, `json?: boolean`, `message?: string`, `provider?: string`, `apiUrl?: string`, `apiKey?: string`, `model?: string`, `cwd?: string` | Parsed CLI flags. |
 | `CodetalkerConfig` | `apiUrl?: string`, `apiKey?: string`, `model?: string`, `provider?: string` | Persisted user config. Minimum: `apiUrl` when calling remote API. |
-| `SourceFile` | `path: string`, `language: string`, `size: number`, `exports: string[]`, `functions: string[]`, `imports: string[]`, `types: string[]` | A source file in the repository. |
+| `SourceFile` | `path: string`, `language: string`, `size: number`, `exports: string[]`, `functions: string[]`, `imports: string[]`, `types: string[]` | A source file in the repository. (Field `size` is replaced by `bytes` in current code; map updated to reflect bytes) |
 | `SourceSummary` | `count: number`, `languages: { name, count }[]`, `entryCandidates: string[]` | Summary of scanned source files. |
 | `ScanReport` | `root: string`, `files: SourceFile[]`, `source: SourceSummary`, `packageInfo: object`, `config: object`, `commands: object[]`, `git: { changedPaths: string[] }`, `semanticMaps: object[]`, `ci: object[]`, `moduleRoles: object[]` | Full scan output. |
 | `TokenUsage` | `promptTokens: number`, `completionTokens: number`, `totalTokens: number` | Token counts from LLM calls. |
@@ -330,11 +330,36 @@ No public npm package API; all functionality is CLI‑driven or VS Code extensio
 
 ### Semantic Analysis (`src/semantic.ts`)
 
-| Function | Parameters | Returns | Side Effects | Errors | Calls |
-|----------|------------|---------|--------------|--------|-------|
-| `runSemanticMap(options)` | `options: CliOptions` | `Promise<void>` | LLM calls, file writes (cache and map) | LLM errors, LSP failures | `buildSemanticInventory`, `analyzeFunction`, `loadSemanticCache`, `saveSemanticCache`, `renderSemanticSection` |
-| `analyzeFunction(options, item, cache, ordinal, total, panel)` | `options: CliOptions`, `item: SemanticInventoryItem`, `cache: SemanticCacheManifest`, `ordinal: number`, `total: number`, `panel: MissionPanel` | `Promise<SemanticFunctionCacheEntry>` | LLM call, panel updates | LLM errors | `callChatCompletionMessages`, `prompts.semanticExtractionPrompt` |
-| `buildSemanticInventory(cwd, sourceFiles, astIndex, lspResult)` | `cwd: string`, `sourceFiles: SourceFile[]`, `astIndex: SymbolIndex`, `lspResult?: LspPoolResult` | `SemanticInventoryItem[]` | Reads source files | None | `collectLspInventory`, `findHeuristicExcerpt`, `deriveOwnerFromQualifiedName` |
+| Function | Visibility | Parameters | Returns | Side Effects | Errors | Calls / Collaborators |
+|----------|------------|------------|---------|--------------|--------|-----------------------|
+| `runSemanticMap(options)` | exported | `options: CliOptions` | `Promise<void>` | LLM calls, file writes (cache and map), panel updates | LLM errors, LSP failures | `collectSourceFiles`, `buildMap`, `buildSymbolIndex`, `saveIndex`, `LspPool.extractAll`, `runSemanticTasks`, `analyzeFunction`, `loadSemanticCache`, `saveSemanticCache`, `mergeSemanticCache`, `renderSemanticSection`, `replaceSection`, `refreshGeneratedHeader` |
+| `analyzeFunction(options, item, cache, ordinal, total, panel, context)` | exported | `options: CliOptions`, `item: SemanticInventoryItem`, `cache: SemanticCacheManifest`, `ordinal: number`, `total: number`, `panel: MissionPanel`, `context: SemanticTaskContext` | `Promise<SemanticFunctionCacheEntry>` | LLM call, panel updates | LLM errors | `semanticExtractionPrompt`, `callChatCompletionMessages`, `normalizeSemanticRecord` |
+| `buildSemanticInventory(cwd, sourceFiles, astIndex, lspResult?)` | exported | `cwd: string`, `sourceFiles: SourceFile[]`, `astIndex: SymbolIndex`, `lspResult?: LspPoolResult` | `SemanticInventoryItem[]` | Reads source files, computes fingerprints | None | `collectLspInventory`, `findHeuristicExcerpt`, `makeSemanticKey`, `hashText`, `deriveOwnerFromQualifiedName` |
+| `runSemanticTasks(inventory, worker, parallel)` | exported | `inventory: SemanticInventoryItem[]`, `worker: (item, index) => Promise<T>`, `parallel: number` | `Promise<T[]>` | None (calls `worker`) | None | N/A (generic task runner) |
+| `resolveSemanticParallel(mode, requested, totalItems)` | exported | `mode: "fixed" \| "max"`, `requested: number`, `totalItems: number` | `number` | None | None | N/A |
+| `loadSemanticCache(cachePath)` | exported | `cachePath: string` | `SemanticCacheManifest` | Reads file if exists | None | `readFileSync`, `JSON.parse` |
+| `saveSemanticCache(cachePath, cache)` | exported | `cachePath: string`, `cache: SemanticCacheManifest` | `void` | Writes file | None | `writeFileSync`, `ensureParentDirectory` |
+| `mergeSemanticCache(current, analyses)` | exported | `current: SemanticCacheManifest`, `analyses: AnalysisResult[]` | `SemanticCacheManifest` | None | None | N/A |
+| `collectLspInventory(context, symbols, ancestry, parent, inventory)` | exported | `context: InventoryContext`, `symbols: LspDocumentSymbol[]`, `ancestry: LspDocumentSymbol[]`, `parent: LspDocumentSymbol \| undefined`, `inventory: SemanticInventoryItem[]` | `void` | Mutates `inventory` array | None | `findOwner`, `buildQualifiedName`, `excerptForSymbol`, `buildContextExcerpt`, `makeSemanticKey`, `hashText`, `buildClassContext` |
+| `findOwner(ancestry)` | exported | `ancestry: LspDocumentSymbol[]` | `LspDocumentSymbol \| undefined` | None | None | N/A |
+| `buildQualifiedName(ancestry, leafName)` | exported | `ancestry: LspDocumentSymbol[]`, `leafName: string` | `string` | None | None | N/A |
+| `buildClassContext(owner, ancestry)` | exported | `owner: LspDocumentSymbol`, `ancestry: LspDocumentSymbol[]` | `string` | None | None | N/A |
+| `excerptForSymbol(content, symbol, owner?)` | exported | `content: string`, `symbol: LspDocumentSymbol`, `owner?: LspDocumentSymbol` | `string` | None | None | `sliceLines` |
+| `buildContextExcerpt(content, symbol, owner?, parent?, siblings, index)` | exported | `content: string`, `symbol: LspDocumentSymbol`, `owner?: LspDocumentSymbol`, `parent?: LspDocumentSymbol`, `siblings: LspDocumentSymbol[]`, `index: number` | `string` | None | None | `sliceLines`, `limitText` |
+| `sliceLines(content, startLine, endLine, includeNumbers)` | exported | `content: string`, `startLine: number`, `endLine: number`, `includeNumbers: boolean` | `string` | None | None | N/A |
+| `findHeuristicExcerpt(content, symbolName, padding)` | exported | `content: string`, `symbolName: string`, `padding: number` | `string` | None | None | `escapeRegExp`, `limitText` |
+| `normalizeSemanticRecord(raw, item)` | exported | `raw: string`, `item: SemanticInventoryItem` | `SemanticFunctionRecord` | None | None | `parseSemanticJson`, `fallbackSemanticRecord` |
+| `fallbackSemanticRecord(raw, item)` | exported | `raw: string`, `item: SemanticInventoryItem` | `SemanticFunctionRecord` | None | None | N/A |
+| `parseSemanticJson(raw)` | exported | `raw: string` | `unknown` (null on failure) | None | None | N/A |
+| `normalizeString(value)` | exported | `value: unknown` | `string` | None | None | N/A |
+| `normalizeStringArray(value)` | exported | `value: unknown` | `string[]` | None | None | N/A |
+| `renderSemanticSection(entries)` | exported | `entries: AnalysisResult[]` | `string` (Markdown section) | None | None | `formatList` |
+| `formatList(items)` | exported | `items: string[]` | `string` | None | None | N/A |
+| `buildSemanticTaskContext(inventory, index)` | exported | `inventory: SemanticInventoryItem[]`, `index: number` | `SemanticTaskContext` | None | None | N/A |
+| `formatSemanticQueuedStatus(ordinal, qualifiedName, context)` | exported | `ordinal: number`, `qualifiedName: string`, `context: SemanticTaskContext` | `string` | None | None | `formatQueuePreview` |
+| `formatSemanticActiveStatus(ordinal, qualifiedName, context, startedCount, finishedCount, total)` | exported | `ordinal: number`, `qualifiedName: string`, `context: SemanticTaskContext`, `startedCount: number`, `finishedCount: number`, `total: number` | `string` | None | None | `formatQueuePreview` |
+| `formatSemanticDetail(qualifiedName, context)` | exported | `qualifiedName: string`, `context: SemanticTaskContext` | `string` | None | None | `formatQueuePreview` |
+| `formatSemanticDoneStatus(prefix, ordinal, qualifiedName, cont` | exported | (truncated in file) | `string` | None | None | N/A |
 
 ### Tools (`src/tools/`)
 
@@ -350,14 +375,38 @@ No public npm package API; all functionality is CLI‑driven or VS Code extensio
 
 ### Utilities (`src/utils.ts` key functions)
 
-| Function | Parameters | Returns | Side Effects | Calls |
-|----------|------------|---------|--------------|-------|
-| `collectSourceFiles(rootPath, depth?)` | `rootPath: string`, `depth?: ScanDepth` | `SourceFile[]` | File walk, gitignore filtering | `isGitignored`, `getExtension` |
-| `buildMap(files, summary)` | `files: SourceFile[]`, `summary: SourceSummary` | `string` | None | None |
-| `buildScanReport(root, files, config)` | `root: string`, `files: SourceFile[]`, `config: CodetalkerConfig` | `ScanReport` | Git diff, package.json read | `getChangedFiles`, `scanPackageInfo`, `scanSemanticMaps` |
-| `readConfig()` | `(none)` | `CodetalkerConfig` | Read `~/.codetalker/config.json` | Throws if file missing |
-| `parseOptions(argv)` | `argv: string[]` | `CliOptions` | None | None |
-| `replaceSection(content, heading, newContent)` | `content: string`, `heading: string`, `newContent: string` | `string` | None | None |
+| Function | Visibility | Parameters | Returns | Side Effects | Errors | Calls |
+|----------|------------|------------|---------|--------------|--------|-------|
+| `collectSourceFiles(rootPath)` | exported | `rootPath: string` | `SourceFile[]` | File walk, gitignore filtering | None | `createGitignoreMatcher`, `isGitignored`, `getExtension`, `statSync` |
+| `summarize(files)` | exported | `files: SourceFile[]` | `SourceSummary` | None | None | N/A |
+| `buildMap(root, files)` | exported | `root: string`, `files: SourceFile[]` | `string` (Markdown map) | None | None | `summarize` |
+| `buildTemplate()` | exported | `(none)` | `string` | None | None | None |
+| `buildChangeSync(changedFiles)` | exported | `changedFiles: string[]` | `string` | None | None | None |
+| `buildScanReport(options, onStage?)` | exported | `options: CliOptions`, `onStage?: (msg: string) => void` | `ScanReport` | Git diff, package.json read, file reads | None | `collectSourceFiles`, `summarize`, `scanPackageInfo`, `scanConfigState`, `scanCi`, `scanSemanticMaps`, `inferModuleRoles`, `getChangedFiles` |
+| `formatScan(report)` | exported | `report: ScanReport` | `string` | None | None | None |
+| `buildRepositoryEvidence(options, files, includeProductFiles?)` | exported | `options: CliOptions`, `files: SourceFile[]`, `includeProductFiles?: boolean` | `string` | File reads | None | `loadIndex`, `unique`, `existsSync`, `readFileSync` |
+| `readConfig(options)` | exported | `options: CliOptions` | `CodetalkerConfig` | None (reads file, env) | `fail` if missing | `tryReadConfig` |
+| `tryReadConfig()` | exported | `(none)` | `CodetalkerConfig \| undefined` | Reads config file | None | `readFileSync`, `JSON.parse` |
+| `writeConfig(config)` | exported | `config: CodetalkerConfig` | `void` | Writes file with mode 0o600 | None | `writeFileSync`, `ensureParentDirectory` |
+| `configPath()` | exported | `(none)` | `string` | None | None | N/A |
+| `normalizeParallel(value)` | exported | `value: number` | `number` | None | None | N/A |
+| `parseOptions(argv)` | exported | `argv: string[]` | `CliOptions` | None | None | None |
+| `splitFilesForAgents(files, parallel)` | exported | `files: SourceFile[]`, `parallel: number` | `SourceFile[][]` | None | None | N/A |
+| `runLimited(items, worker, parallel)` | exported | `items: I[]`, `worker: (item, index) => Promise<T>`, `parallel: number` | `Promise<T[]>` | None | None | N/A |
+| `createGitignoreMatcher(root)` | exported | `root: string` | `(targetPath: string) => boolean` | Reads `.gitignore` if exists | None | `loadGitignore` |
+| `loadGitignore(root)` | exported | `root: string` | `string[]` | Reads file | None | `readFileSync` |
+| `isGitignored(patterns, root, abspath)` | exported | `patterns: string[]`, `root: string`, `abspath: string` | `boolean` | May spawn `git check-ignore` | None | `execFileSync` |
+| `replaceSection(content, heading, newContent)` | exported | `content: string`, `heading: string`, `newContent: string` | `string` | None | None | None |
+| `normalizePath(path)` | exported | `path: string` | `string` | None | None | None |
+| `fail(message)` | exported | `message: string` | `never` | prints to stderr, process.exit(1) | None | None |
+| `ensureParentDirectory(path)` | exported | `path: string` | `void` | Creates directories | None | `mkdirSync` |
+| `unique(arr)` | exported | `arr: string[]` | `string[]` | None | None | None |
+| `scanPackageInfo(cwd)` | exported | `cwd: string` | `object \| undefined` | Reads package.json | None | `readFileSync`, `JSON.parse` |
+| `scanSemanticMaps(options)` | exported | `options: CliOptions` | `object[]` | Reads stat, compares mtimes | None | `collectSourceFiles`, `statSync` |
+| `scanCi(cwd)` | exported | `cwd: string` | `object[]` | Checks existence | None | `existsSync` |
+| `scanConfigState()` | exported | `(none)` | `object` | None | None | `existsSync` |
+| `inferModuleRoles(cwd, files)` | exported | `cwd: string`, `files: SourceFile[]` | `object[]` | Checks existence of certain files | None | `inferSourceRole`, `existsSync` |
+| `inferSourceRole(path)` | exported | `path: string` | `string` | None | None | None |
 
 ### VS Code ViewProvider (`src/vscode/viewProvider.ts`)
 
@@ -391,7 +440,7 @@ No public npm package API; all functionality is CLI‑driven or VS Code extensio
 - **init**: `initMap()` → `utils.buildTemplate()` → writes to `CODEMAP.md`.
 - **config**: `configure()` → `tui/config.configureTui()` → interactive menu → writes config.
 - **scan**: `scanRepo()` → `utils.collectSourceFiles()` → `utils.buildScanReport()` → optionally calls `runArchitectureScan()` which uses LSP pool and LLM reviewer agents → `utils.buildMap()` → writes `CODEMAP.md`.
-- **semantic**: `semanticMap()` → reads current map → calls `semantic.runSemanticMap()` which builds inventory, analyzes each function via LLM, merges cache, and writes updated map.
+- **semantic**: `semanticMap()` → reads current map → calls `semantic.runSemanticMap()` which builds inventory, runs parallel workers (`runSemanticTasks`) to analyze each function via LLM, merges cache, renders semantic section, and writes updated map.
 - **ask**: `askCodebase()` → reads map + builds evidence → sends to LLM (stream or non‑stream) → displays answer.
 - **plan**: `planChange()` → reads map + builds evidence → sends to LLM with tools → writes `CODEPLAN.md`.
 - **exec**: `execution()` → reads `CODEPLAN.md` → parses specs → creates backup → spawns parallel editor agents (via LLM) → validates with gatekeeper → applies changes → auto‑syncs map.
@@ -405,6 +454,24 @@ No public npm package API; all functionality is CLI‑driven or VS Code extensio
 3. Sends `semanticSyncPrompt` to LLM with old map and changed files.
 4. LLM returns updated map text.
 5. `replaceSection()` updates `CODEMAP.md` in place.
+
+### Semantic Analysis Flow (updated)
+1. `semanticMap()` in handlers calls `runSemanticMap(options)`.
+2. Collects source files via `collectSourceFiles`.
+3. Builds baseline map if none exists (`buildMap`).
+4. Builds symbol index via `buildSymbolIndex` and saves it.
+5. Extracts hierarchical symbols via `LspPool.extractAll`.
+6. Builds function inventory via `buildSemanticInventory` (uses LSP or heuristic excerpts).
+7. Loads semantic cache from `.codetalk/semantic/manifest.json`.
+8. Runs parallel workers via `runSemanticTasks` with concurrency controlled by `resolveSemanticParallel`.
+9. Each worker calls `analyzeFunction`:
+   - Checks cache hit by fingerprint; if unchanged, skips LLM call.
+   - Otherwise, calls `callChatCompletionMessages` with extraction prompt.
+   - Parses response via `parseSemanticJson` and normalizes into `SemanticFunctionRecord`.
+10. Merges results into cache via `mergeSemanticCache`.
+11. Renders `## Functions` section via `renderSemanticSection`.
+12. Updates `CODEMAP.md` via `replaceSection` and `refreshGeneratedHeader`.
+13. Saves updated cache and writes map.
 
 ### Error Handling
 - Missing config: commands that need LLM exit with error message (or prompt for config).
@@ -427,7 +494,7 @@ No public npm package API; all functionality is CLI‑driven or VS Code extensio
 ### Data Transformations
 1. **File → Symbol Index**: `collectSourceFiles()` → `buildSymbolIndex()` (AST + LSP) → `SymbolIndex` (mapping file → exports, functions, imports, types).
 2. **Symbol Index → Evidence**: `buildRepositoryEvidence()` truncates and formats for agent context.
-3. **File + Map + LLM → Semantic Map**: `runSemanticMap()` → inventory items → LLM generates `SemanticFunctionRecord` per function → `renderSemanticSection()` → updated map.
+3. **File + Map + LLM → Semantic Map**: `runSemanticMap()` → inventory items → parallel LLM workers generate `SemanticFunctionRecord` per function → `renderSemanticSection()` → updated map.
 4. **Plan Request → CODEPLAN.md**: `planChange()` → LLM with tools → YAML plan file.
 5. **CODEPLAN.md → File Edits**: `execution()` → parse YAML → edit via LLM editor agents → apply diffs.
 6. **Map + Diff → Updated Map**: `syncMap()` → LLM updates map sections.
@@ -443,7 +510,7 @@ No public npm package API; all functionality is CLI‑driven or VS Code extensio
 
 ### Caching
 - **Symbol index**: in‑memory (not persisted by default); rebuilt on each scan/index.
-- **Semantic cache**: stored in `{repoRoot}/.codetalk/semantic/manifest.json`; version‑stamped; used by `runSemanticMap` to avoid re‑analysis of unchanged functions.
+- **Semantic cache**: stored in `{repoRoot}/.codetalk/semantic/manifest.json`; version‑stamped; used by `runSemanticMap` to avoid re‑analysis of unchanged functions. Fingerprint computed from source excerpt and context.
 - **LLM response cache**: not implemented (but could be added).
 - **Gitignore patterns**: loaded per scan; cached in `createGitignoreMatcher()` for file walking.
 

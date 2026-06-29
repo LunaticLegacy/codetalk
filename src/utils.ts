@@ -659,6 +659,7 @@ export function parseOptions(args: string[]): CliOptions {
   let parallel = 4;
   let parallelMode: "fixed" | "max" = "fixed";
   let timeout: number | undefined;
+  let maxRetries: number | undefined;
   let apiUrl: string | undefined;
   let apiKey: string | undefined;
   let model: string | undefined;
@@ -727,6 +728,16 @@ export function parseOptions(args: string[]): CliOptions {
       continue;
     }
 
+    if (arg === "--max-retries") {
+      const raw = args[++index] ?? "0";
+      const parsed = Number.parseInt(raw, 10);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        fail(`Invalid max-retries: "${raw}". Must be a non-negative integer.`);
+      }
+      maxRetries = parsed;
+      continue;
+    }
+
     if (arg === "--api-url") {
       apiUrl = args[++index];
       continue;
@@ -756,6 +767,7 @@ export function parseOptions(args: string[]): CliOptions {
     parallel: normalizeParallel(parallel),
     parallelMode,
     timeout,
+    maxRetries,
     apiUrl,
     apiKey,
     model,
@@ -792,20 +804,20 @@ export function splitFilesForAgents(files: SourceFile[], parallel: number): Sour
   return chunks.map((chunk) => chunk.files.sort((a, b) => a.path.localeCompare(b.path)));
 }
 
-export async function runLimited<T>(tasks: Array<() => Promise<T>>, parallel: number): Promise<T[]> {
-  const results: T[] = new Array(tasks.length);
+export async function runLimited<I, T>(items: I[], worker: (item: I, index: number) => Promise<T>, parallel: number): Promise<T[]> {
+  const results: T[] = new Array(items.length);
   let nextIndex = 0;
-  const workerCount = Math.min(normalizeParallel(parallel), tasks.length);
+  const workerCount = Math.min(normalizeParallel(parallel), items.length);
 
-  async function worker(): Promise<void> {
-    while (nextIndex < tasks.length) {
+  async function runWorker(): Promise<void> {
+    while (nextIndex < items.length) {
       const current = nextIndex;
       nextIndex += 1;
-      results[current] = await tasks[current]();
+      results[current] = await worker(items[current], current);
     }
   }
 
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
   return results;
 }
 
